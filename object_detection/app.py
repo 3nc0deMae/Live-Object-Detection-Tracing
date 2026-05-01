@@ -254,8 +254,8 @@ st.markdown("""
         display: none !important;
     }
     
-    /* Hide any extra button elements in the video container */
-    .streamlit-webrtc div:has(> button) {
+    /* Hide any extra button elements */
+    .streamlit-webrtc button {
         display: none !important;
     }
 </style>
@@ -498,7 +498,7 @@ class VideoProcessor:
                 img = frame.to_ndarray(format="bgr24")
                 if self.mirror_view:
                     img = cv2.flip(img, 1)
-                return frame
+                return av.VideoFrame.from_ndarray(img, format="bgr24")
         
         img = frame.to_ndarray(format="bgr24")
         
@@ -640,7 +640,7 @@ if st.session_state.camera_active:
         # Parse resolution
         width, height = map(int, st.session_state.resolution.split('x'))
         
-        # Configure WebRTC streamer without showing its default buttons
+        # Configure WebRTC streamer
         webrtc_ctx = webrtc_streamer(
             key="object-detection",
             mode=WebRtcMode.SENDRECV,
@@ -659,16 +659,14 @@ if st.session_state.camera_active:
                     {"urls": ["stun:stun.l.google.com:19302"]},
                     {"urls": ["stun:stun1.l.google.com:19302"]}
                 ]
-            },
-            # Hide the default UI elements
-            desired_playing_state=True
+            }
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status message (no buttons here)
-        if webrtc_ctx and webrtc_ctx.state.playing:
+        # Show status message safely without accessing state.initialized
+        if webrtc_ctx and webrtc_ctx.video_processor:
             st.success("✨ Camera active | Object detection running smoothly ✨")
-        elif webrtc_ctx and webrtc_ctx.state.initialized:
+        elif webrtc_ctx:
             st.info("🔄 Camera initializing... Please wait...")
         else:
             st.warning("⚠️ Camera not ready. Please check permissions.")
