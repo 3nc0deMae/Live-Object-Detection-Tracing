@@ -7,15 +7,6 @@ import os
 import time
 import numpy as np
 
-def load_css():
-    # Gets the directory where app.py is located
-    current_dir = os.path.dirname(__file__)
-    css_path = os.path.join(current_dir, 'styles.css')
-    
-    with open(css_path, 'r') as f:
-        # Your code to apply the CSS, e.g., st.markdown(...)
-        pass
-
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
 if not os.path.exists(SAVED_FRAMES_DIR):
@@ -42,15 +33,248 @@ def load_model():
 
 model = load_model()
 
-# Load CSS styles
-load_css()
-
-# HTML for ribbons
+# Custom CSS for girly ribbon theme - Hide expander arrow text
 st.markdown("""
+<style>
+    /* Import elegant font */
+    @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&family=Dancing+Script:wght@400;500;600;700&display=swap');
+    
+    /* Main container styling with pastel gradient */
+    .stApp {
+        background: linear-gradient(135deg, #ffe6f0 0%, #e6d5ff 50%, #d5e8ff 100%);
+        padding-top: 60px !important;
+        padding-bottom: 60px !important;
+    }
+    
+    /* Top ribbon decoration */
+    .top-ribbon {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 24px;
+        background: linear-gradient(90deg, #ffb6c1, #dda0dd, #87ceeb);
+        padding: 10px;
+        color: white;
+        font-family: 'Dancing Script', cursive;
+        letter-spacing: 5px;
+        z-index: 999;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    /* Bottom ribbon decoration */
+    .bottom-ribbon {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 20px;
+        background: linear-gradient(90deg, #ffb6c1, #dda0dd, #87ceeb);
+        padding: 8px;
+        color: white;
+        font-family: 'Dancing Script', cursive;
+        letter-spacing: 5px;
+        z-index: 999;
+    }
+    
+    /* Main content spacing */
+    .main-content {
+        margin-top: 20px;
+        margin-bottom: 20px;
+    }
+    
+    /* Apply font to all text */
+    html, body, .stMarkdown, .stText, .stButton, .stCheckbox, .stSelectbox, .stSlider {
+        font-family: 'Quicksand', sans-serif !important;
+    }
+    
+    /* Headers with cursive font */
+    h1, h2, h3, .stSubheader {
+        font-family: 'Dancing Script', cursive !important;
+        font-weight: 600 !important;
+        background: linear-gradient(135deg, #ff69b4, #9370db, #4169e1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Main title */
+    h1 {
+        font-size: 3.5em !important;
+        margin-top: 0px !important;
+        text-align: center !important;
+    }
+    
+    /* Transparent buttons with pastel border */
+    .stButton > button {
+        background: rgba(255, 255, 255, 0.35) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 2px solid rgba(255, 182, 193, 0.6) !important;
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        border-radius: 25px !important;
+        padding: 10px 25px !important;
+        letter-spacing: 0.5px !important;
+    }
+    
+    .stButton > button:hover {
+        background: rgba(255, 255, 255, 0.55) !important;
+        border: 2px solid #ffb6c1 !important;
+        transform: translateY(-3px) !important;
+        box-shadow: 0 8px 20px rgba(255, 105, 180, 0.3) !important;
+        color: #8b3e8b !important;
+    }
+    
+    /* Primary button special styling */
+    button[kind="primary"] {
+        background: linear-gradient(135deg, rgba(255, 182, 193, 0.6), rgba(221, 160, 221, 0.6), rgba(135, 206, 235, 0.6)) !important;
+        border: 2px solid #ffb6c1 !important;
+        color: white !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Sidebar styling with transparency */
+    [data-testid="stSidebar"] {
+        background: rgba(255, 240, 245, 0.85) !important;
+        backdrop-filter: blur(15px) !important;
+        border-radius: 20px !important;
+        margin: 10px !important;
+        border: 2px solid rgba(255, 182, 193, 0.5) !important;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1) !important;
+    }
+    
+    [data-testid="stSidebar"] * {
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+    }
+    
+    /* Hide the expander arrow text completely - Remove keyboard_double_arrow_left */
+    .streamlit-expanderHeader span:first-child {
+        display: none !important;
+    }
+    
+    /* Keep only the arrow icon */
+    .streamlit-expanderHeader svg {
+        display: inline-block !important;
+    }
+    
+    /* Remove any pseudo-elements or extra text */
+    .streamlit-expanderHeader::before,
+    .streamlit-expanderHeader::after {
+        display: none !important;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background: rgba(255, 255, 255, 0.35) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 20px !important;
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+        font-weight: 600 !important;
+        border: 1px solid rgba(255, 182, 193, 0.5) !important;
+    }
+    
+    /* Checkbox styling */
+    .stCheckbox > label {
+        color: #6b3e6b !important;
+        font-weight: 500 !important;
+    }
+    
+    /* Selectbox styling */
+    .stSelectbox > label {
+        color: #6b3e6b !important;
+        font-weight: 500 !important;
+    }
+    
+    /* Slider styling */
+    .stSlider > label {
+        color: #6b3e6b !important;
+        font-weight: 500 !important;
+    }
+    
+    /* Alert boxes */
+    .stAlert {
+        background: rgba(255, 255, 255, 0.7) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 15px !important;
+        color: #6b3e6b !important;
+        border-left: 4px solid #ffb6c1 !important;
+    }
+    
+    /* Column containers */
+    .stColumn > div {
+        background: rgba(255, 255, 255, 0.25) !important;
+        backdrop-filter: blur(8px) !important;
+        border-radius: 20px !important;
+        padding: 15px !important;
+        border: 1px solid rgba(255, 182, 193, 0.4) !important;
+    }
+    
+    /* Download button */
+    .stDownloadButton > button {
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 2px solid rgba(221, 160, 221, 0.6) !important;
+        color: #6b3e6b !important;
+    }
+    
+    /* Metrics styling */
+    [data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(8px) !important;
+        border-radius: 15px !important;
+        padding: 10px !important;
+        border: 1px solid rgba(255, 182, 193, 0.5) !important;
+    }
+    
+    /* Image containers */
+    .stImage {
+        border-radius: 20px !important;
+        overflow: hidden !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #ffe6f0;
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #ffb6c1, #dda0dd, #87ceeb);
+        border-radius: 10px;
+    }
+    
+    /* Smooth animations */
+    .stButton > button, .streamlit-expanderHeader {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    /* Video placeholder */
+    .stImage {
+        background: rgba(255, 255, 255, 0.2) !important;
+        border-radius: 20px !important;
+    }
+</style>
+
+<!-- Top Ribbon -->
 <div class="top-ribbon">
-    ✨🌸✨ Object Detection ✨🌸✨
+    ✨🌸✨Object Detection ✨🌸✨
 </div>
 
+<!-- Bottom Ribbon -->
 <div class="bottom-ribbon">
     ✨ Made with 💕 by AI Magic | Object Detection & Tracking ✨
 </div>
@@ -122,6 +346,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### 🗑️ Manage Saved Frames")
     if st.button("🗑️ Delete ALL Saved Frames", use_container_width=True):
+        # Only look in saved_frames folder
         saved_frames = [f for f in os.listdir(SAVED_FRAMES_DIR) if f.startswith(("detected_frame_", "auto_saved_frame_")) and f.endswith(".jpg")]
         if saved_frames:
             for frame in saved_frames:
@@ -165,6 +390,7 @@ with disp_col2:
     
 with disp_col3:
     st.markdown("#### 💾 Saved Frames")
+    # Get all saved frames from the saved_frames folder ONLY
     saved_frames = [f for f in os.listdir(SAVED_FRAMES_DIR) if f.startswith(("detected_frame_", "auto_saved_frame_")) and f.endswith(".jpg")]
     saved_frames.sort(reverse=True)
     
@@ -403,6 +629,7 @@ def run_camera():
         if save_frame_request and (current_time - st.session_state.last_save_time) > 1:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             filename = f"detected_frame_{timestamp}.jpg"
+            # Save ONLY in saved_frames folder
             filepath = os.path.join(SAVED_FRAMES_DIR, filename)
             
             cv2.imwrite(filepath, final_frame)
@@ -415,6 +642,7 @@ def run_camera():
         if auto_save and (current_time - last_auto_save_time) >= 10:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             filename = f"auto_saved_frame_{timestamp}.jpg"
+            # Save ONLY in saved_frames folder
             filepath = os.path.join(SAVED_FRAMES_DIR, filename)
             
             cv2.imwrite(filepath, final_frame)
