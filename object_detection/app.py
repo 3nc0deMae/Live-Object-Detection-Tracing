@@ -14,7 +14,7 @@ SAVED_FRAMES_DIR = "saved_frames"
 if not os.path.exists(SAVED_FRAMES_DIR):
     os.makedirs(SAVED_FRAMES_DIR)
 
-# Initialize session state - PERSISTENT STATE
+# Initialize session state
 if 'object_counts' not in st.session_state:
     st.session_state.object_counts = defaultdict(int)
 if 'detection_log' not in st.session_state:
@@ -43,10 +43,8 @@ if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
 if 'mirror_view_enabled' not in st.session_state:
     st.session_state.mirror_view_enabled = True
-if 'camera_initialized' not in st.session_state:
-    st.session_state.camera_initialized = False
-if 'last_keepalive' not in st.session_state:
-    st.session_state.last_keepalive = time.time()
+if 'camera_error' not in st.session_state:
+    st.session_state.camera_error = None
 
 # Cache the model
 @st.cache_resource
@@ -54,7 +52,6 @@ def load_model():
     with st.spinner("🔄 Loading AI Model..."):
         try:
             model = YOLO("yolov8n.pt")
-            # Warm up the model
             dummy_input = np.zeros((320, 320, 3), dtype=np.uint8)
             model(dummy_input, verbose=False)
             st.session_state.model_ready = True
@@ -63,7 +60,6 @@ def load_model():
             st.warning(f"⚠️ Model loading issue: {str(e)[:100]}")
             return None
 
-# Load model
 model = load_model()
 
 # Custom CSS for girly ribbon theme
@@ -289,6 +285,15 @@ with st.sidebar:
     if mirror_view != st.session_state.mirror_view_enabled:
         st.session_state.mirror_view_enabled = mirror_view
     
+    # Camera device selection
+    st.markdown("#### 📷 Camera Device")
+    camera_device = st.selectbox(
+        "Select Camera",
+        options=["Default Camera", "Back Camera", "Front Camera"],
+        index=0,
+        help="Choose which camera to use"
+    )
+    
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
         "Low (480p) - Fastest": "640x480",
@@ -341,20 +346,32 @@ with st.sidebar:
 # Video display area
 video_display_area = st.empty()
 
-# Camera control buttons - SIMPLE AND STABLE
+# Camera troubleshooting info
+with st.expander("🔧 Camera Troubleshooting Tips"):
+    st.markdown("""
+    **If camera doesn't work, try these steps:**
+    1. 🔒 **Check permissions** - Make sure you've allowed camera access in your browser
+    2. 🔄 **Refresh the page** - Sometimes a simple refresh helps
+    3. 🎥 **Close other apps** - Other apps using the camera might block access
+    4. 🌐 **Try different browser** - Chrome or Edge work best for camera access
+    5. 🔌 **Check camera connection** - Ensure your camera is properly connected
+    6. 🚫 **Disable VPN** - VPNs can sometimes interfere with camera access
+    7. 📱 **On mobile** - Make sure to grant camera permissions when prompted
+    """)
+
+# Camera control buttons
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     if not st.session_state.camera_active:
         if st.button("📷 Start Camera 💖", use_container_width=True, type="primary"):
             st.session_state.camera_active = True
-            st.session_state.camera_initialized = False
+            st.session_state.camera_error = None
             st.session_state.object_counts.clear()
             st.session_state.detection_log.clear()
             st.rerun()
     else:
         if st.button("⏹️ Stop Camera 💔", use_container_width=True, type="secondary"):
             st.session_state.camera_active = False
-            st.session_state.camera_initialized = False
             st.session_state.webrtc_ctx = None
             video_display_area.empty()
             st.rerun()
@@ -478,10 +495,10 @@ def add_overlays(frame, object_counts, mirror_view_enabled):
     
     return frame_copy
 
-# Video Processor - STABLE AND PERSISTENT
+# Video Processor
 class VideoProcessor:
     def __init__(self):
-        self.frame_skip = 1  # Process every frame for smoother video
+        self.frame_skip = 1
         self.frame_count = 0
         self.last_alert_time = 0
         self.last_auto_save_time = 0
@@ -495,13 +512,21 @@ class VideoProcessor:
     def recv(self, frame):
         self.frame_count += 1
         
-        # Get current mirror view setting
         mirror_view_enabled = st.session_state.mirror_view_enabled
         
-        # Convert frame to numpy array
-        img = frame.to_ndarray(format="bgr24")
+        try:
+            img = frame.to_ndarray(format="bgr24")
+        except Exception as e:
+            # If frame conversion fails, return empty frame
+            if self.last_frame is not None:
+                return av.VideoFrame.from_ndarray(self.last_frame, format="bgr24")
+            else:
+                # Create a blank frame
+                blank = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(blank, "Camera initializing...", (50, 240), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                return av.VideoFrame.from_ndarray(blank, format="bgr24")
         
-        # Apply mirror view if enabled
         if mirror_view_enabled:
             img = cv2.flip(img, 1)
         
@@ -516,7 +541,6 @@ class VideoProcessor:
         current_detections = []
         if self.model_available and self.model is not None:
             try:
-                # Use smaller image size for faster processing
                 conf_threshold = 0.5
                 results = self.model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
                 
@@ -540,7 +564,6 @@ class VideoProcessor:
                             'confidence': confidence
                         })
                     
-                    # Update counts
                     current_counts = defaultdict(int)
                     for det in current_detections:
                         current_counts[det['class']] += 1
@@ -548,12 +571,10 @@ class VideoProcessor:
                     for obj, count in current_counts.items():
                         st.session_state.object_counts[obj] = count
                     
-                    # Reset counts for objects not detected
                     for obj in list(st.session_state.object_counts.keys()):
                         if obj not in current_counts:
                             st.session_state.object_counts[obj] = 0
                     
-                    # Handle alerts
                     current_time = time.time()
                     if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
                         for det in current_detections:
@@ -568,19 +589,15 @@ class VideoProcessor:
                                 st.session_state.last_alert_time = current_time
                                 break
             except Exception as e:
-                # Silent fail - keep camera running
                 pass
         
-        # Draw bounding boxes
         if current_detections:
             annotated_frame = draw_smooth_boxes(img, current_detections)
         else:
             annotated_frame = img
         
-        # Add overlays
         final_frame = add_overlays(annotated_frame, st.session_state.object_counts, mirror_view_enabled)
         
-        # Add FPS counter
         cv2.putText(final_frame, f"{self.current_fps} fps", 
                    (8, final_frame.shape[0] - 10), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
@@ -626,10 +643,10 @@ class VideoProcessor:
         except:
             pass
         
-        # Return processed frame
+        self.last_frame = final_frame
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC Streamer - KEEPS CAMERA STABLE AND OPEN
+# WebRTC Streamer with better camera access
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
@@ -646,9 +663,9 @@ if st.session_state.camera_active:
         if not st.session_state.model_ready or model is None:
             st.info("🔄 Loading AI model... Detection will start shortly")
         
-        # Configure WebRTC - STABLE CONFIGURATION
+        # Configure WebRTC with better camera access
         webrtc_ctx = webrtc_streamer(
-            key="object-detection-stable",
+            key="object-detection-fixed",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessor,
             media_stream_constraints={
@@ -663,25 +680,30 @@ if st.session_state.camera_active:
             rtc_configuration={
                 "iceServers": [
                     {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]}
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]}
                 ]
             },
-            desired_playing_state=True
+            desired_playing_state=True,
+            # Add these for better camera access
+            video_html_attrs={
+                "style": {"width": "100%", "height": "auto", "border-radius": "20px"},
+                "autoPlay": True,
+                "playsInline": True,
+            },
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status without auto-closing
+        # Show status
         if webrtc_ctx and webrtc_ctx.video_processor:
-            if st.session_state.model_ready and model is not None:
-                st.success("✨ Camera Active | Object Detection Running ✨")
-            else:
-                st.info("🔄 Camera Active | Waiting for AI Model...")
+            st.success("✨ Camera Active | Object Detection Running ✨")
+        elif webrtc_ctx and webrtc_ctx.state == "connected":
+            st.success("✨ Camera Connected | Starting detection... ✨")
         else:
-            st.info("🎥 Initializing camera... Please wait")
+            st.info("🎥 Requesting camera access... Please allow permissions when prompted")
 else:
     with video_display_area.container():
-        st.info("🌸✨ Click 'Start Camera' to begin! ✨🌸\n\n💕 Make sure to allow camera permissions")
+        st.info("🌸✨ Click 'Start Camera' to begin! ✨🌸\n\n💕 Make sure to allow camera permissions when prompted\n\n📱 On mobile devices, you may need to tap the screen to enable camera")
     
-    # Clear context when camera is stopped
     if st.session_state.webrtc_ctx is not None:
         st.session_state.webrtc_ctx = None
