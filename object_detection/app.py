@@ -931,15 +931,15 @@ if st.session_state.camera_active:
                 {"urls": ["stun:stun1.l.google.com:19302"]},
                 {
                     "urls": [
-                        "turn:openrelay.metered.ca:443?transport=tcp",
-                        "turn:openrelay.metered.ca:443?transport=udp",
-                        "turn:openrelay.metered.ca:80?transport=tcp",
-                        "turn:openrelay.metered.ca:80?transport=udp",
+                        "turn:global.relay.metered.ca:443?transport=tcp",
+                        "turn:global.relay.metered.ca:443?transport=udp",
+                        "turn:global.relay.metered.ca:80?transport=tcp",
                     ],
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject",
+                    "username": "e8dd65892f87c0f94e1e6e42",
+                    "credential": "mFq6dDcLzY+4GqVJ",
                 },
-            ]
+            ],
+            "iceTransportPolicy": "relay",
         },
     )
     st.session_state.webrtc_ctx = webrtc_ctx
