@@ -285,11 +285,11 @@ st.markdown("""
     }
     
     .streamlit-webrtc .stButton {
-        display: none !important;
+        display: block !important;
     }
     
     .streamlit-webrtc button {
-        display: none !important;
+        display: block !important;
     }
 </style>
 
@@ -658,14 +658,13 @@ if st.session_state.camera_active:
                 },
                 "audio": False,
             },
-            async_processing=True,
+            async_processing=False,
             rtc_configuration={
                 "iceServers": [
                     {"urls": ["stun:stun.l.google.com:19302"]},
                     {"urls": ["stun:stun1.l.google.com:19302"]}
                 ]
             },
-            desired_playing_state=True
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
