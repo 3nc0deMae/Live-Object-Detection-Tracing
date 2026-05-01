@@ -31,7 +31,7 @@ if 'last_alert_time' not in st.session_state:
 if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
 if 'mirror_view_enabled' not in st.session_state:
-    st.session_state.mirror_view_enabled = False
+    st.session_state.mirror_view_enabled = True
 if 'frame_count' not in st.session_state:
     st.session_state.frame_count = 0
 
@@ -43,7 +43,7 @@ class SharedData:
         self.last_alert_time = 0
         self.last_auto_save_time = 0
         self.last_save_time = 0
-        self.mirror_view_enabled = False
+        self.mirror_view_enabled = True
         self.enable_alerts = True
         self.alert_objects = ["person"]
         self.auto_save = False
@@ -325,13 +325,24 @@ class VideoProcessor:
                 except Exception:
                     pass
 
-            # Draw boxes on frame
-            if self.last_detections:
-                img = draw_boxes(img, self.last_detections)
-
-            # Apply mirror AFTER drawing boxes
+            # Apply mirror BEFORE drawing boxes so text stays readable
             if mirror_enabled:
                 img = cv2.flip(img, 1)
+
+            # Draw boxes on frame (after flip so labels are correct)
+            if self.last_detections:
+                if mirror_enabled:
+                    mirrored_detections = []
+                    for det in self.last_detections:
+                        x1, y1, x2, y2 = det['box']
+                        mirrored_detections.append({
+                            'box': [orig_w - x2, y1, orig_w - x1, y2],
+                            'class': det['class'],
+                            'confidence': det['confidence']
+                        })
+                    img = draw_boxes(img, mirrored_detections)
+                else:
+                    img = draw_boxes(img, self.last_detections)
 
             # Add overlays
             current_counts = sd.get_counts()
