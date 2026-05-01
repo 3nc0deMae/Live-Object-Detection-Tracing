@@ -117,7 +117,11 @@ class SharedData:
         with self.lock:
             return self.save_request
 
+<<<<<<< HEAD
 # Initialize shared data as module-level
+=======
+# Initialize shared data as module-level (needed for WebRTC worker thread access)
+>>>>>>> ede43d4553aa4da27d6018507b2d6a8c64936dcc
 if 'shared_data' not in globals():
     shared_data = SharedData()
 
@@ -136,6 +140,342 @@ model = load_model()
 if model is not None:
     st.session_state.model_ready = True
 
+<<<<<<< HEAD
+=======
+# Custom CSS
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&family=Dancing+Script:wght@400;500;600;700&display=swap');
+    
+    .stApp {
+        background: linear-gradient(135deg, #ffe6f0 0%, #e6d5ff 50%, #d5e8ff 100%);
+        padding-top: 60px !important;
+        padding-bottom: 60px !important;
+    }
+    
+    .top-ribbon {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 24px;
+        background: linear-gradient(90deg, #ffb6c1, #dda0dd, #87ceeb);
+        padding: 10px;
+        color: white;
+        font-family: 'Dancing Script', cursive;
+        letter-spacing: 5px;
+        z-index: 999;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .bottom-ribbon {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 20px;
+        background: linear-gradient(90deg, #ffb6c1, #dda0dd, #87ceeb);
+        padding: 8px;
+        color: white;
+        font-family: 'Dancing Script', cursive;
+        letter-spacing: 5px;
+        z-index: 999;
+    }
+    
+    html, body, .stMarkdown, .stText, .stButton, .stCheckbox, .stSelectbox, .stSlider {
+        font-family: 'Quicksand', sans-serif !important;
+    }
+    
+    h1, h2, h3, .stSubheader {
+        font-family: 'Dancing Script', cursive !important;
+        font-weight: 600 !important;
+        background: linear-gradient(135deg, #ff69b4, #9370db, #4169e1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+        font-size: 3.5em !important;
+        margin-top: 0px !important;
+        text-align: center !important;
+    }
+    
+    .stButton > button {
+        background: rgba(255, 255, 255, 0.35) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 2px solid rgba(255, 182, 193, 0.6) !important;
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        border-radius: 25px !important;
+        padding: 10px 25px !important;
+        letter-spacing: 0.5px !important;
+    }
+    
+    .stButton > button:hover {
+        background: rgba(255, 255, 255, 0.55) !important;
+        border: 2px solid #ffb6c1 !important;
+        transform: translateY(-3px) !important;
+        box-shadow: 0 8px 20px rgba(255, 105, 180, 0.3) !important;
+        color: #8b3e8b !important;
+    }
+    
+    button[kind="primary"] {
+        background: linear-gradient(135deg, rgba(255, 182, 193, 0.6), rgba(221, 160, 221, 0.6), rgba(135, 206, 235, 0.6)) !important;
+        border: 2px solid #ffb6c1 !important;
+        color: white !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+    }
+    
+    [data-testid="stSidebar"] {
+        background: rgba(255, 240, 245, 0.85) !important;
+        backdrop-filter: blur(15px) !important;
+        border-radius: 20px !important;
+        margin: 10px !important;
+        border: 2px solid rgba(255, 182, 193, 0.5) !important;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1) !important;
+    }
+    
+    [data-testid="stSidebar"] * {
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+    }
+    
+    .streamlit-expanderHeader span:first-child {
+        display: none !important;
+    }
+    
+    .streamlit-expanderHeader svg {
+        display: inline-block !important;
+    }
+    
+    .streamlit-expanderHeader::before,
+    .streamlit-expanderHeader::after {
+        display: none !important;
+    }
+    
+    .streamlit-expanderHeader {
+        background: rgba(255, 255, 255, 0.35) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 20px !important;
+        color: #6b3e6b !important;
+        font-family: 'Quicksand', sans-serif !important;
+        font-weight: 600 !important;
+        border: 1px solid rgba(255, 182, 193, 0.5) !important;
+    }
+    
+    .stCheckbox > label {
+        color: #6b3e6b !important;
+        font-weight: 500 !important;
+    }
+    
+    .stSelectbox > label {
+        color: #6b3e6b !important;
+        font-weight: 500 !important;
+    }
+    
+    .stAlert {
+        background: rgba(255, 255, 255, 0.7) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 15px !important;
+        color: #6b3e6b !important;
+        border-left: 4px solid #ffb6c1 !important;
+    }
+    
+    .stColumn > div {
+        background: rgba(255, 255, 255, 0.25) !important;
+        backdrop-filter: blur(8px) !important;
+        border-radius: 20px !important;
+        padding: 15px !important;
+        border: 1px solid rgba(255, 182, 193, 0.4) !important;
+    }
+    
+    .stDownloadButton > button {
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 2px solid rgba(221, 160, 221, 0.6) !important;
+        color: #6b3e6b !important;
+    }
+    
+    ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+        background: #ffe6f0;
+        border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #ffb6c1, #dda0dd, #87ceeb);
+        border-radius: 10px;
+    }
+    
+    .stButton > button, .streamlit-expanderHeader {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    .streamlit-webrtc video {
+        border-radius: 20px !important;
+        width: 100% !important;
+        height: auto !important;
+        background: rgba(0,0,0,0.1) !important;
+    }
+    
+    .streamlit-webrtc .stButton {
+        display: block !important;
+    }
+    
+    .streamlit-webrtc button {
+        display: block !important;
+    }
+</style>
+
+<div class="top-ribbon">
+    ✨🌸✨Object Detection ✨🌸✨
+</div>
+
+<div class="bottom-ribbon">
+    ✨ Made with 💕 by AI Magic | Object Detection & Tracking ✨
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("<h1>✨ Live Object Detection & Tracing ✨</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #6b3e6b; font-size: 1.2em; font-family: Quicksand; margin-bottom: 30px;'>🌸 Point your camera at objects to identify them in real-time with AI magic 🌸</p>", unsafe_allow_html=True)
+
+# Sidebar controls
+with st.sidebar:
+    st.markdown("### ✨💖 Settings 💖✨")
+    
+    st.markdown("#### 🎥 Camera Settings")
+    mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
+    if mirror_view != st.session_state.mirror_view_enabled:
+        st.session_state.mirror_view_enabled = mirror_view
+        shared_data.set_mirror(mirror_view)
+    
+    st.markdown("#### 📱 Quality & Resolution")
+    resolution_options = {
+        "Low (480p) - Fastest": "640x480",
+        "Medium (720p) - Balanced": "1280x720", 
+    }
+    selected_resolution = st.selectbox(
+        "🎬 Select Resolution",
+        options=list(resolution_options.keys()),
+        index=0,
+        help="Higher resolution = better quality but more processing power needed"
+    )
+    st.session_state.resolution = resolution_options[selected_resolution]
+    
+    st.markdown("#### 📊 Object Counting")
+    show_counting = st.checkbox("🔢 Show Object Counting", value=True)
+    
+    st.markdown("#### 🚨 Alert System")
+    enable_alerts = st.checkbox("🔔 Enable Alerts", value=True)
+    alert_objects = st.multiselect(
+        "🎯 Alert for these objects",
+        options=["person", "cell phone", "bottle", "laptop", "chair", "book", "tv", "cat", "dog", "bird"],
+        default=["person"]
+    )
+    
+    st.markdown("#### 💾 Frame Saving")
+    save_frame_request = st.button("📸 Save Current Frame", use_container_width=True)
+    auto_save = st.checkbox("🤖 Auto-save every 10 seconds", value=False)
+    
+    if st.button("🔄 Reset All Counters", use_container_width=True):
+        st.session_state.object_counts.clear()
+        st.session_state.detection_log.clear()
+        shared_data.__init__()
+        st.success("✨ Counters reset successfully! ✨")
+    
+    st.markdown("---")
+    st.markdown("#### 🗑️ Manage Saved Frames")
+    if st.button("🗑️ Delete ALL Saved Frames", use_container_width=True):
+        saved_frames = [f for f in os.listdir(SAVED_FRAMES_DIR) if f.startswith(("detected_frame_", "auto_saved_frame_")) and f.endswith(".jpg")]
+        if saved_frames:
+            for frame in saved_frames:
+                try:
+                    os.remove(os.path.join(SAVED_FRAMES_DIR, frame))
+                except:
+                    pass
+            st.success(f"✅ Deleted {len(saved_frames)} saved frames 💕")
+            st.rerun()
+        else:
+            st.info("💝 No saved frames to delete")
+
+# Video display area
+video_display_area = st.empty()
+
+# Camera control buttons
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    if not st.session_state.camera_active:
+        if st.button("📷 Start Camera 💖", use_container_width=True, type="primary"):
+            st.session_state.camera_active = True
+            st.session_state.object_counts.clear()
+            st.session_state.detection_log.clear()
+            st.rerun()
+    else:
+        if st.button("⏹️ Stop Camera 💔", use_container_width=True, type="secondary"):
+            st.session_state.camera_active = False
+            st.session_state.webrtc_ctx = None
+            video_display_area.empty()
+            st.rerun()
+
+# Display area for counts and alerts
+st.markdown("---")
+disp_col1, disp_col2, disp_col3 = st.columns(3)
+
+with disp_col1:
+    st.markdown("#### 📊 Object Count")
+    count_placeholder = st.empty()
+    
+with disp_col2:
+    st.markdown("#### 🚨 Recent Alerts")
+    alert_placeholder = st.empty()
+    
+with disp_col3:
+    st.markdown("#### 💾 Saved Frames")
+    saved_frames = [f for f in os.listdir(SAVED_FRAMES_DIR) if f.startswith(("detected_frame_", "auto_saved_frame_")) and f.endswith(".jpg")]
+    saved_frames.sort(reverse=True)
+    
+    if saved_frames:
+        st.write(f"📸 Total saved: {len(saved_frames)} frames")
+        for idx, frame_file in enumerate(saved_frames[:5]):
+            frame_path = os.path.join(SAVED_FRAMES_DIR, frame_file)
+            with open(frame_path, "rb") as file:
+                with st.expander(f"🖼️ {frame_file[:30]}..."):
+                    img = cv2.imread(frame_path)
+                    if img is not None:
+                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                        st.image(img_rgb, use_container_width=True)
+                    
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        st.download_button(
+                            label="📥 Download",
+                            data=file,
+                            file_name=frame_file,
+                            mime="image/jpeg",
+                            key=f"download_{frame_file}_{idx}"
+                        )
+                    with col_btn2:
+                        if st.button(f"🗑️ Delete", key=f"delete_{frame_file}_{idx}"):
+                            try:
+                                os.remove(frame_path)
+                                st.success(f"✅ Deleted: {frame_file}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting: {e}")
+    else:
+        st.write("💝 No frames saved yet")
+>>>>>>> ede43d4553aa4da27d6018507b2d6a8c64936dcc
 
 # Object colors
 OBJECT_COLORS = {
@@ -230,7 +570,10 @@ class VideoProcessor:
         self.model_available = model is not None
         self.last_detections = []
         self.shared_data = shared_data
+<<<<<<< HEAD
         self._save_thread = None
+=======
+>>>>>>> ede43d4553aa4da27d6018507b2d6a8c64936dcc
         
     def _save_frame_async(self, filepath, img):
         """Save frame to disk in a background thread."""
@@ -362,6 +705,7 @@ class VideoProcessor:
             # Handle auto-save (offload disk I/O)
             if auto_save and (current_time - sd.last_auto_save_time) >= 10:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+<<<<<<< HEAD
                 filepath = os.path.join(
                     SAVED_FRAMES_DIR, f"auto_saved_frame_{timestamp}.jpg"
                 )
@@ -373,6 +717,37 @@ class VideoProcessor:
                 t.start()
                 sd.last_auto_save_time = current_time
 
+=======
+                filename = f"auto_saved_frame_{timestamp}.jpg"
+                filepath = os.path.join(SAVED_FRAMES_DIR, filename)
+                cv2.imwrite(filepath, img)
+                st.session_state.last_auto_save_time = current_time
+            
+            # Update UI displays
+            if self.frame_count % 10 == 0:
+                try:
+                    if show_counting and current_counts:
+                        active_counts = {k: v for k, v in current_counts.items() if v > 0}
+                        if active_counts:
+                            count_text = ""
+                            for obj, count in active_counts.items():
+                                count_text += f"*{obj}:* {count}  \n"
+                            count_placeholder.markdown(count_text)
+                        else:
+                            count_placeholder.write("No objects detected")
+                    
+                    if enable_alerts:
+                        alerts = self.shared_data.get_alerts()
+                        if alerts:
+                            recent_alerts = alerts[-3:]
+                            alert_html = ""
+                            for alert in recent_alerts:
+                                alert_html += f"🔔 *{alert['object']}* detected ({alert['confidence']})\n\n"
+                            alert_placeholder.warning(alert_html)
+                except:
+                    pass
+            
+>>>>>>> ede43d4553aa4da27d6018507b2d6a8c64936dcc
             return av.VideoFrame.from_ndarray(img, format="bgr24")
 
         except Exception:
@@ -383,6 +758,7 @@ class VideoProcessor:
             )
             return av.VideoFrame.from_ndarray(blank, format="bgr24")
 
+<<<<<<< HEAD
 
 st.markdown("""
 <style>
@@ -802,6 +1178,52 @@ st.markdown(
 # Sidebar controls
 with st.sidebar:
     st.markdown("### ✨💖 Settings 💖✨")
+=======
+# WebRTC Streamer
+if st.session_state.camera_active:
+    with video_display_area.container():
+        st.markdown("### 🎥 Live Camera Feed")
+        
+        if st.session_state.mirror_view_enabled:
+            st.caption("🪞 Mirror Mode: ON - Image is flipped horizontally")
+        else:
+            st.caption("🎥 Normal Mode")
+        
+        width, height = map(int, st.session_state.resolution.split('x'))
+        
+        if not st.session_state.model_ready or model is None:
+            st.warning("⚠️ AI Model is still loading... Detection will start when ready")
+        else:
+            st.success("✅ AI Model Ready - Detecting objects in real-time!")
+        
+        webrtc_ctx = webrtc_streamer(
+            key="working-object-detection",
+            mode=WebRtcMode.SENDRECV,
+            video_processor_factory=VideoProcessor,
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": width, "max": width},
+                    "height": {"ideal": height, "max": height},
+                    "frameRate": {"ideal": 20, "max": 25},
+                },
+                "audio": False,
+            },
+            async_processing=False,
+            rtc_configuration={
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["stun:stun1.l.google.com:19302"]}
+                ]
+            },
+        )
+        st.session_state.webrtc_ctx = webrtc_ctx
+        
+        if webrtc_ctx and webrtc_ctx.video_processor:
+            st.success("✨ Camera Active | Real-time Detection Running ✨")
+elif not st.session_state.camera_active:
+    with video_display_area.container():
+        st.info("🌸✨ Click 'Start Camera' to begin real-time object detection! ✨🌸\n\n💕 Make sure to allow camera permissions\n\n🎯 Detects: people, phones, laptops, bottles, books, pets, and more!")
+>>>>>>> ede43d4553aa4da27d6018507b2d6a8c64936dcc
     
     st.markdown("#### 🎥 Camera Settings")
     mirror_view = st.checkbox(
