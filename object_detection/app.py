@@ -8,6 +8,8 @@ from datetime import datetime
 import os
 import time
 import numpy as np
+import threading
+import queue
 
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
@@ -39,17 +41,50 @@ if 'fps_update_time' not in st.session_state:
     st.session_state.fps_update_time = time.time()
 if 'current_fps' not in st.session_state:
     st.session_state.current_fps = 0
+if 'model_ready' not in st.session_state:
+    st.session_state.model_ready = False
+if 'connection_status' not in st.session_state:
+    st.session_state.connection_status = "checking"
 
-# Cache the model
+# Function to check internet connection
+def check_internet_connection():
+    import socket
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
+        return True
+    except OSError:
+        return False
+
+# Cache the model with retry logic
 @st.cache_resource
 def load_model():
-    model = YOLO("yolov8n.pt")
-    # Warm up the model
-    dummy_input = np.zeros((640, 640, 3), dtype=np.uint8)
-    model(dummy_input, verbose=False)
-    return model
+    max_retries = 5
+    retry_delay = 3
+    
+    for attempt in range(max_retries):
+        try:
+            st.info(f"🔄 Loading AI model... (Attempt {attempt + 1}/{max_retries})")
+            model = YOLO("yolov8n.pt")
+            # Warm up the model
+            dummy_input = np.zeros((320, 320, 3), dtype=np.uint8)
+            model(dummy_input, verbose=False)
+            st.session_state.model_ready = True
+            st.success("✅ AI Model loaded successfully!")
+            return model
+        except Exception as e:
+            if attempt < max_retries - 1:
+                st.warning(f"⚠️ Connection issue. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 1.5  # Exponential backoff
+            else:
+                st.error("❌ Failed to load model. Please check your internet connection.")
+                raise e
 
-model = load_model()
+# Load model with connection handling
+try:
+    model = load_model()
+except:
+    model = None
 
 # Custom CSS for girly ribbon theme
 st.markdown("""
@@ -258,6 +293,21 @@ st.markdown("""
     .streamlit-webrtc button {
         display: none !important;
     }
+    
+    /* Connection status indicator */
+    .connection-status {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+        animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 0.5; transform: scale(0.8); }
+        100% { opacity: 1; transform: scale(1.2); }
+    }
 </style>
 
 <div class="top-ribbon">
@@ -338,15 +388,18 @@ with st.sidebar:
 # Video display area
 video_display_area = st.empty()
 
-# Camera control buttons (only one set of buttons)
+# Camera control buttons
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     if not st.session_state.camera_active:
         if st.button("📷 Start Camera 💖", use_container_width=True, type="primary"):
-            st.session_state.camera_active = True
-            st.session_state.object_counts.clear()
-            st.session_state.detection_log.clear()
-            st.rerun()
+            if model is not None:
+                st.session_state.camera_active = True
+                st.session_state.object_counts.clear()
+                st.session_state.detection_log.clear()
+                st.rerun()
+            else:
+                st.error("❌ Model is still loading. Please wait a moment...")
     else:
         if st.button("⏹️ Stop Camera 💔", use_container_width=True, type="secondary"):
             st.session_state.camera_active = False
@@ -473,11 +526,11 @@ def add_overlays(frame, object_counts, mirror_view):
     
     return frame_copy
 
-# Optimized Video Processor with frame skipping to prevent freezing
+# Optimized Video Processor with connection resilience
 class VideoProcessor:
     def __init__(self):
         self.mirror_view = mirror_view
-        self.frame_skip = 2  # Process every 2nd frame
+        self.frame_skip = 2
         self.frame_count = 0
         self.last_alert_time = 0
         self.last_auto_save_time = 0
@@ -485,21 +538,15 @@ class VideoProcessor:
         self.fps_start_time = time.time()
         self.current_fps = 0
         self.last_frame = None
+        self.model = model
+        self.model_available = model is not None
+        self.retry_count = 0
+        self.max_retries = 3
         
     def recv(self, frame):
         self.frame_count += 1
         
-        # Skip frames for better performance
-        if self.frame_count % self.frame_skip != 0:
-            # Return last processed frame or original frame
-            if self.last_frame is not None:
-                return av.VideoFrame.from_ndarray(self.last_frame, format="bgr24")
-            else:
-                img = frame.to_ndarray(format="bgr24")
-                if self.mirror_view:
-                    img = cv2.flip(img, 1)
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-        
+        # Always show camera feed even if model is processing
         img = frame.to_ndarray(format="bgr24")
         
         # Apply mirror if needed
@@ -513,62 +560,69 @@ class VideoProcessor:
             self.fps_counter = 0
             self.fps_start_time = time.time()
         
-        # Process frame with YOLO (simplified for speed)
-        try:
-            conf_threshold = 0.45
-            results = model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
-        except Exception as e:
-            results = None
-        
+        # Process frame with YOLO if model is available
         current_detections = []
-        if results and results[0].boxes is not None:
-            boxes = results[0].boxes
-            names = results[0].names
-            
-            for box in boxes:
-                class_id = int(box.cls[0])
-                class_name = names[class_id]
-                confidence = float(box.conf[0])
-                
-                if hasattr(box, 'xyxy'):
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                else:
-                    x1, y1, x2, y2 = box[0].tolist()
-                
-                current_detections.append({
-                    'box': [x1, y1, x2, y2],
-                    'class': class_name,
-                    'confidence': confidence
-                })
-            
-            # Update counts
-            current_counts = defaultdict(int)
-            for det in current_detections:
-                current_counts[det['class']] += 1
-            
-            for obj, count in current_counts.items():
-                st.session_state.object_counts[obj] = count
-            
-            # Reset counts for objects not detected
-            for obj in list(st.session_state.object_counts.keys()):
-                if obj not in current_counts:
-                    st.session_state.object_counts[obj] = 0
-            
-            # Handle alerts
-            current_time = time.time()
-            if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
-                for det in current_detections:
-                    if det['class'] in alert_objects:
-                        st.session_state.detection_log.append({
-                            'timestamp': datetime.now().strftime("%H:%M:%S"),
-                            'object': det['class'],
-                            'confidence': f"{det['confidence']:.2f}"
-                        })
-                        # Keep only last 10 alerts
-                        if len(st.session_state.detection_log) > 10:
-                            st.session_state.detection_log = st.session_state.detection_log[-10:]
-                        st.session_state.last_alert_time = current_time
-                        break
+        if self.model_available and self.model is not None:
+            try:
+                # Skip frames for better performance
+                if self.frame_count % self.frame_skip == 0:
+                    conf_threshold = 0.45
+                    results = self.model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
+                    
+                    if results and results[0].boxes is not None:
+                        boxes = results[0].boxes
+                        names = results[0].names
+                        
+                        for box in boxes:
+                            class_id = int(box.cls[0])
+                            class_name = names[class_id]
+                            confidence = float(box.conf[0])
+                            
+                            if hasattr(box, 'xyxy'):
+                                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                            else:
+                                x1, y1, x2, y2 = box[0].tolist()
+                            
+                            current_detections.append({
+                                'box': [x1, y1, x2, y2],
+                                'class': class_name,
+                                'confidence': confidence
+                            })
+                        
+                        # Update counts
+                        current_counts = defaultdict(int)
+                        for det in current_detections:
+                            current_counts[det['class']] += 1
+                        
+                        for obj, count in current_counts.items():
+                            st.session_state.object_counts[obj] = count
+                        
+                        # Reset counts for objects not detected
+                        for obj in list(st.session_state.object_counts.keys()):
+                            if obj not in current_counts:
+                                st.session_state.object_counts[obj] = 0
+                        
+                        # Handle alerts
+                        current_time = time.time()
+                        if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
+                            for det in current_detections:
+                                if det['class'] in alert_objects:
+                                    st.session_state.detection_log.append({
+                                        'timestamp': datetime.now().strftime("%H:%M:%S"),
+                                        'object': det['class'],
+                                        'confidence': f"{det['confidence']:.2f}"
+                                    })
+                                    if len(st.session_state.detection_log) > 10:
+                                        st.session_state.detection_log = st.session_state.detection_log[-10:]
+                                    st.session_state.last_alert_time = current_time
+                                    break
+                    self.retry_count = 0  # Reset retry count on success
+            except Exception as e:
+                self.retry_count += 1
+                # Don't crash, just continue without detection for this frame
+                if self.retry_count > self.max_retries:
+                    self.model_available = False
+                pass
         
         # Draw bounding boxes
         if current_detections:
@@ -579,10 +633,15 @@ class VideoProcessor:
         # Add overlays
         final_frame = add_overlays(annotated_frame, st.session_state.object_counts, self.mirror_view)
         
-        # Add FPS text
-        cv2.putText(final_frame, f"FPS: {self.current_fps}", 
-                   (8, final_frame.shape[0] - 10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
+        # Add status messages
+        if not self.model_available or self.model is None:
+            cv2.putText(final_frame, "Waiting for connection...", 
+                       (8, final_frame.shape[0] - 20), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
+        else:
+            cv2.putText(final_frame, f"FPS: {self.current_fps}", 
+                       (8, final_frame.shape[0] - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
         
         # Handle frame saving (non-blocking)
         current_time = time.time()
@@ -606,7 +665,7 @@ class VideoProcessor:
         
         # Update placeholders
         try:
-            if show_counting and st.session_state.object_counts:
+            if show_counting and st.session_state.object_counts and self.model_available:
                 active_counts = {k: v for k, v in st.session_state.object_counts.items() if v > 0}
                 if active_counts:
                     count_text = ""
@@ -615,6 +674,8 @@ class VideoProcessor:
                     count_placeholder.markdown(count_text)
                 else:
                     count_placeholder.write("No objects detected")
+            elif not self.model_available:
+                count_placeholder.warning("⏳ Waiting for connection...")
             
             if enable_alerts and st.session_state.detection_log:
                 recent_alerts = st.session_state.detection_log[-3:]
@@ -632,7 +693,7 @@ class VideoProcessor:
         # Return processed frame
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC streamer configuration with hidden buttons
+# WebRTC streamer with connection resilience
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
@@ -640,7 +701,11 @@ if st.session_state.camera_active:
         # Parse resolution
         width, height = map(int, st.session_state.resolution.split('x'))
         
-        # Configure WebRTC streamer
+        # Show connection status
+        if not st.session_state.model_ready or model is None:
+            st.warning("🌐 Waiting for stable internet connection to load AI model...\n\nThe camera will start detecting objects once the connection is stable.")
+        
+        # Configure WebRTC streamer with longer timeouts for connection issues
         webrtc_ctx = webrtc_streamer(
             key="object-detection",
             mode=WebRtcMode.SENDRECV,
@@ -657,22 +722,27 @@ if st.session_state.camera_active:
             rtc_configuration={
                 "iceServers": [
                     {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]}
-                ]
+                    {"urls": ["stun:stun1.l.google.com:19302"]},
+                    {"urls": ["stun:stun2.l.google.com:19302"]}
+                ],
+                "iceTransportPolicy": "all",
+                "bundlePolicy": "max-bundle",
+                "rtcpMuxPolicy": "require"
             }
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status message safely without accessing state.initialized
+        # Show status message safely
         if webrtc_ctx and webrtc_ctx.video_processor:
-            st.success("✨ Camera active | Object detection running smoothly ✨")
+            if st.session_state.model_ready and model is not None:
+                st.success("✨ Camera active | AI model ready | Object detection running ✨")
+            else:
+                st.info("🔄 Camera active | Waiting for AI model to load... | Detection will start automatically when ready")
         elif webrtc_ctx:
             st.info("🔄 Camera initializing... Please wait...")
-        else:
-            st.warning("⚠️ Camera not ready. Please check permissions.")
 else:
     with video_display_area.container():
-        st.info("🌸✨ Click 'Start Camera' below to begin object detection! ✨🌸\n\n💕 Make sure to allow camera permissions when prompted")
+        st.info("🌸✨ Click 'Start Camera' below to begin object detection! ✨🌸\n\n💕 Make sure to allow camera permissions when prompted\n\n🌐 Note: First-time loading may take a few moments while the AI model downloads")
     
     if st.session_state.webrtc_ctx is not None:
         st.session_state.webrtc_ctx = None
