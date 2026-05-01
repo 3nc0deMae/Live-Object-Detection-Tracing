@@ -218,8 +218,8 @@ def add_overlays(frame, object_counts, mirror_view_enabled, show_counting):
 
 
 class VideoProcessor:
-    INFERENCE_SIZE = 320  # Downscale for YOLO inference
-    PROCESS_EVERY_N = 3   # Run detection every N frames
+    INFERENCE_SIZE = 416  # Downscale for YOLO inference (320->416 for better accuracy)
+    PROCESS_EVERY_N = 4   # Run detection every N frames (3->4 for less lag)
 
     def __init__(self):
         self.frame_count = 0
@@ -913,7 +913,7 @@ if st.session_state.camera_active:
             },
             "audio": False,
         },
-        async_processing=False,
+        async_processing=True,
         rtc_configuration={
             "iceServers": [
                 {"urls": ["stun:stun.l.google.com:19302"]},
