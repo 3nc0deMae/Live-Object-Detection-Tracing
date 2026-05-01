@@ -928,7 +928,17 @@ if st.session_state.camera_active:
         rtc_configuration={
             "iceServers": [
                 {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:stun1.l.google.com:19302"]}
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {
+                    "urls": [
+                        "turn:openrelay.metered.ca:443?transport=tcp",
+                        "turn:openrelay.metered.ca:443?transport=udp",
+                        "turn:openrelay.metered.ca:80?transport=tcp",
+                        "turn:openrelay.metered.ca:80?transport=udp",
+                    ],
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject",
+                },
             ]
         },
     )
