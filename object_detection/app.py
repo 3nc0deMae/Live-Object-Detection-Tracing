@@ -15,7 +15,7 @@ SAVED_FRAMES_DIR = "saved_frames"
 if not os.path.exists(SAVED_FRAMES_DIR):
     os.makedirs(SAVED_FRAMES_DIR)
 
-# Initialize session state - ALL at the beginning
+# Initialize ALL session state variables FIRST
 if 'object_counts' not in st.session_state:
     st.session_state.object_counts = defaultdict(int)
 if 'detection_log' not in st.session_state:
@@ -39,7 +39,7 @@ if 'mirror_view_enabled' not in st.session_state:
 if 'frame_count' not in st.session_state:
     st.session_state.frame_count = 0
 
-# Thread-safe storage for shared data
+# Thread-safe shared data using a simple class (not dependent on session state)
 class SharedData:
     def __init__(self):
         self.object_counts = defaultdict(int)
@@ -47,11 +47,12 @@ class SharedData:
         self.last_alert_time = 0
         self.last_auto_save_time = 0
         self.mirror_view_enabled = True
+        self.current_fps = 0
         self.lock = threading.Lock()
     
     def update_counts(self, counts):
         with self.lock:
-            self.object_counts = counts
+            self.object_counts = counts.copy() if counts else defaultdict(int)
     
     def get_counts(self):
         with self.lock:
@@ -74,10 +75,17 @@ class SharedData:
     def get_mirror(self):
         with self.lock:
             return self.mirror_view_enabled
+    
+    def set_fps(self, fps):
+        with self.lock:
+            self.current_fps = fps
+    
+    def get_fps(self):
+        with self.lock:
+            return self.current_fps
 
-# Initialize shared data
-if 'shared_data' not in st.session_state:
-    st.session_state.shared_data = SharedData()
+# Initialize shared data (independent of session state)
+shared_data = SharedData()
 
 # Cache the model
 @st.cache_resource
@@ -313,7 +321,7 @@ with st.sidebar:
     mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
     if mirror_view != st.session_state.mirror_view_enabled:
         st.session_state.mirror_view_enabled = mirror_view
-        st.session_state.shared_data.set_mirror(mirror_view)
+        shared_data.set_mirror(mirror_view)
     
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
@@ -346,7 +354,10 @@ with st.sidebar:
     if st.button("🔄 Reset All Counters", use_container_width=True):
         st.session_state.object_counts.clear()
         st.session_state.detection_log.clear()
-        st.session_state.shared_data = SharedData()
+        # Reset shared data
+        shared_data.object_counts = defaultdict(int)
+        shared_data.detection_log = []
+        shared_data.last_alert_time = 0
         st.success("✨ Counters reset successfully! ✨")
     
     st.markdown("---")
@@ -490,7 +501,7 @@ def add_overlays(frame, object_counts, mirror_view_enabled):
     
     return frame
 
-# Video Processor with thread-safe access
+# Video Processor with thread-safe access (no direct session state access)
 class VideoProcessor:
     def __init__(self):
         self.frame_count = 0
@@ -500,7 +511,7 @@ class VideoProcessor:
         self.model = model
         self.model_available = model is not None
         self.last_detections = []
-        self.shared_data = st.session_state.shared_data
+        self.last_counts = defaultdict(int)
         
     def recv(self, frame):
         try:
@@ -508,7 +519,7 @@ class VideoProcessor:
             img = frame.to_ndarray(format="bgr24")
             
             # Get current mirror setting from shared data
-            mirror_enabled = self.shared_data.get_mirror()
+            mirror_enabled = shared_data.get_mirror()
             
             # Calculate FPS
             self.frames_in_second += 1
@@ -517,6 +528,7 @@ class VideoProcessor:
                 self.current_fps = self.frames_in_second
                 self.frames_in_second = 0
                 self.fps_start_time = current_time
+                shared_data.set_fps(self.current_fps)
             
             # Process detection every 2 frames
             self.frame_count += 1
@@ -548,18 +560,20 @@ class VideoProcessor:
                                 current_counts[class_name] += 1
                         
                         # Update shared counts
-                        self.shared_data.update_counts(current_counts)
+                        if current_counts:
+                            shared_data.update_counts(current_counts)
+                            self.last_counts = current_counts
                         
                         # Handle alerts
-                        if enable_alerts and (current_time - self.shared_data.last_alert_time) >= 2:
+                        if enable_alerts and (current_time - shared_data.last_alert_time) >= 2:
                             for det in self.last_detections:
                                 if det['class'] in alert_objects:
-                                    self.shared_data.add_alert({
+                                    shared_data.add_alert({
                                         'timestamp': datetime.now().strftime("%H:%M:%S"),
                                         'object': det['class'],
                                         'confidence': f"{det['confidence']:.2f}"
                                     })
-                                    self.shared_data.last_alert_time = current_time
+                                    shared_data.last_alert_time = current_time
                                     break
                 except Exception as e:
                     pass
@@ -573,7 +587,7 @@ class VideoProcessor:
                 img = cv2.flip(img, 1)
             
             # Add overlays
-            current_counts = self.shared_data.get_counts()
+            current_counts = shared_data.get_counts()
             img = add_overlays(img, current_counts, mirror_enabled)
             
             # Add FPS
@@ -610,7 +624,7 @@ class VideoProcessor:
                             count_placeholder.write("No objects detected")
                     
                     if enable_alerts:
-                        alerts = self.shared_data.get_alerts()
+                        alerts = shared_data.get_alerts()
                         if alerts:
                             recent_alerts = alerts[-3:]
                             alert_html = ""
