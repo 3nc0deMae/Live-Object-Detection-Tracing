@@ -75,9 +75,9 @@ class SharedData:
         with self.lock:
             return self.mirror_view_enabled
 
-# Initialize shared data
-if 'shared_data' not in st.session_state:
-    st.session_state.shared_data = SharedData()
+# Initialize shared data as module-level (needed for WebRTC worker thread access)
+if 'shared_data' not in globals():
+    shared_data = SharedData()
 
 # Cache the model
 @st.cache_resource
@@ -313,7 +313,7 @@ with st.sidebar:
     mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
     if mirror_view != st.session_state.mirror_view_enabled:
         st.session_state.mirror_view_enabled = mirror_view
-        st.session_state.shared_data.set_mirror(mirror_view)
+        shared_data.set_mirror(mirror_view)
     
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
@@ -346,7 +346,7 @@ with st.sidebar:
     if st.button("🔄 Reset All Counters", use_container_width=True):
         st.session_state.object_counts.clear()
         st.session_state.detection_log.clear()
-        st.session_state.shared_data = SharedData()
+        shared_data.__init__()
         st.success("✨ Counters reset successfully! ✨")
     
     st.markdown("---")
@@ -500,7 +500,7 @@ class VideoProcessor:
         self.model = model
         self.model_available = model is not None
         self.last_detections = []
-        self.shared_data = st.session_state.shared_data
+        self.shared_data = shared_data
         
     def recv(self, frame):
         try:
@@ -604,7 +604,7 @@ class VideoProcessor:
                         if active_counts:
                             count_text = ""
                             for obj, count in active_counts.items():
-                                count_text += f"**{obj}:** {count}  \n"
+                                count_text += f"*{obj}:* {count}  \n"
                             count_placeholder.markdown(count_text)
                         else:
                             count_placeholder.write("No objects detected")
@@ -615,7 +615,7 @@ class VideoProcessor:
                             recent_alerts = alerts[-3:]
                             alert_html = ""
                             for alert in recent_alerts:
-                                alert_html += f"🔔 **{alert['object']}** detected ({alert['confidence']})\n\n"
+                                alert_html += f"🔔 *{alert['object']}* detected ({alert['confidence']})\n\n"
                             alert_placeholder.warning(alert_html)
                 except:
                     pass
