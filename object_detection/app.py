@@ -7,11 +7,14 @@ import os
 import time
 import numpy as np
 
-# Load external CSS
 def load_css():
-    with open('styles.css', 'r') as f:
-        css = f.read()
-        st.markdown(f'<style>{css}</style>', unsafe_allow_html=True)
+    # Gets the directory where app.py is located
+    current_dir = os.path.dirname(__file__)
+    css_path = os.path.join(current_dir, 'styles.css')
+    
+    with open(css_path, 'r') as f:
+        # Your code to apply the CSS, e.g., st.markdown(...)
+        pass
 
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
