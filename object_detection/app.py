@@ -8,8 +8,6 @@ from datetime import datetime
 import os
 import time
 import numpy as np
-import threading
-from queue import Queue
 
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
@@ -250,6 +248,16 @@ st.markdown("""
         border-radius: 20px !important;
         padding: 10px !important;
     }
+    
+    /* Hide the default WebRTC start/stop buttons */
+    .streamlit-webrtc .stButton {
+        display: none !important;
+    }
+    
+    /* Hide any extra button elements in the video container */
+    .streamlit-webrtc div:has(> button) {
+        display: none !important;
+    }
 </style>
 
 <div class="top-ribbon">
@@ -330,7 +338,7 @@ with st.sidebar:
 # Video display area
 video_display_area = st.empty()
 
-# Camera control buttons
+# Camera control buttons (only one set of buttons)
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     if not st.session_state.camera_active:
@@ -507,11 +515,9 @@ class VideoProcessor:
         
         # Process frame with YOLO (simplified for speed)
         try:
-            # Use smaller input size for faster processing
-            conf_threshold = 0.45  # Slightly lower confidence for better detection
+            conf_threshold = 0.45
             results = model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
         except Exception as e:
-            # Silent fallback
             results = None
         
         current_detections = []
@@ -596,7 +602,7 @@ class VideoProcessor:
                 cv2.imwrite(filepath, final_frame)
                 st.session_state.last_auto_save_time = current_time
         except:
-            pass  # Silent fail for saving issues
+            pass
         
         # Update placeholders
         try:
@@ -618,7 +624,7 @@ class VideoProcessor:
                         alert_html += f"**{alert['object']}** detected\n\n"
                     alert_placeholder.warning(alert_html)
         except:
-            pass  # Silent fail for UI updates
+            pass
         
         # Store last frame
         self.last_frame = final_frame
@@ -626,7 +632,7 @@ class VideoProcessor:
         # Return processed frame
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC streamer configuration
+# WebRTC streamer configuration with hidden buttons
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
@@ -634,6 +640,7 @@ if st.session_state.camera_active:
         # Parse resolution
         width, height = map(int, st.session_state.resolution.split('x'))
         
+        # Configure WebRTC streamer without showing its default buttons
         webrtc_ctx = webrtc_streamer(
             key="object-detection",
             mode=WebRtcMode.SENDRECV,
@@ -642,7 +649,7 @@ if st.session_state.camera_active:
                 "video": {
                     "width": {"ideal": width, "max": width},
                     "height": {"ideal": height, "max": height},
-                    "frameRate": {"ideal": 15, "max": 20},  # Limit framerate for stability
+                    "frameRate": {"ideal": 15, "max": 20},
                 },
                 "audio": False,
             },
@@ -652,11 +659,13 @@ if st.session_state.camera_active:
                     {"urls": ["stun:stun.l.google.com:19302"]},
                     {"urls": ["stun:stun1.l.google.com:19302"]}
                 ]
-            }
+            },
+            # Hide the default UI elements
+            desired_playing_state=True
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status
+        # Show status message (no buttons here)
         if webrtc_ctx and webrtc_ctx.state.playing:
             st.success("✨ Camera active | Object detection running smoothly ✨")
         elif webrtc_ctx and webrtc_ctx.state.initialized:
