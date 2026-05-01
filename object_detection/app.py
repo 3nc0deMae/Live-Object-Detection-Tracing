@@ -8,8 +8,6 @@ from datetime import datetime
 import os
 import time
 import numpy as np
-import threading
-import queue
 
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
@@ -43,17 +41,8 @@ if 'current_fps' not in st.session_state:
     st.session_state.current_fps = 0
 if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
-if 'connection_status' not in st.session_state:
-    st.session_state.connection_status = "checking"
-
-# Function to check internet connection
-def check_internet_connection():
-    import socket
-    try:
-        socket.create_connection(("8.8.8.8", 53), timeout=3)
-        return True
-    except OSError:
-        return False
+if 'mirror_view_enabled' not in st.session_state:
+    st.session_state.mirror_view_enabled = True
 
 # Cache the model with retry logic
 @st.cache_resource
@@ -75,7 +64,7 @@ def load_model():
             if attempt < max_retries - 1:
                 st.warning(f"⚠️ Connection issue. Retrying in {retry_delay} seconds...")
                 time.sleep(retry_delay)
-                retry_delay *= 1.5  # Exponential backoff
+                retry_delay *= 1.5
             else:
                 st.error("❌ Failed to load model. Please check your internet connection.")
                 raise e
@@ -293,21 +282,6 @@ st.markdown("""
     .streamlit-webrtc button {
         display: none !important;
     }
-    
-    /* Connection status indicator */
-    .connection-status {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        margin-right: 8px;
-        animation: pulse 1.5s infinite;
-    }
-    
-    @keyframes pulse {
-        0% { opacity: 0.5; transform: scale(0.8); }
-        100% { opacity: 1; transform: scale(1.2); }
-    }
 </style>
 
 <div class="top-ribbon">
@@ -327,7 +301,13 @@ with st.sidebar:
     st.markdown("### ✨💖 Settings 💖✨")
     
     st.markdown("#### 🎥 Camera Settings")
-    mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=True)
+    mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
+    # Update session state when mirror view changes
+    if mirror_view != st.session_state.mirror_view_enabled:
+        st.session_state.mirror_view_enabled = mirror_view
+        # If camera is active, force refresh to apply mirror setting
+        if st.session_state.camera_active:
+            st.rerun()
     
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
@@ -506,7 +486,7 @@ def draw_smooth_boxes(frame, boxes_data):
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     return frame_copy
 
-def add_overlays(frame, object_counts, mirror_view):
+def add_overlays(frame, object_counts, mirror_view_enabled):
     frame_copy = frame.copy()
     
     if show_counting and object_counts:
@@ -519,17 +499,16 @@ def add_overlays(frame, object_counts, mirror_view):
                            0.45, (255, 105, 180), 1)
                 y_offset += 18
     
-    if mirror_view:
-        cv2.putText(frame_copy, "Mirror View", 
-                   (frame_copy.shape[1] - 100, 20), 
+    if mirror_view_enabled:
+        cv2.putText(frame_copy, "Mirror View (Inverted)", 
+                   (frame_copy.shape[1] - 150, 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
     
     return frame_copy
 
-# Optimized Video Processor with connection resilience
+# Optimized Video Processor with mirror view support
 class VideoProcessor:
     def __init__(self):
-        self.mirror_view = mirror_view
         self.frame_skip = 2
         self.frame_count = 0
         self.last_alert_time = 0
@@ -546,12 +525,15 @@ class VideoProcessor:
     def recv(self, frame):
         self.frame_count += 1
         
-        # Always show camera feed even if model is processing
+        # Get the current mirror view setting from session state
+        mirror_view_enabled = st.session_state.mirror_view_enabled
+        
+        # Get frame as numpy array
         img = frame.to_ndarray(format="bgr24")
         
-        # Apply mirror if needed
-        if self.mirror_view:
-            img = cv2.flip(img, 1)
+        # Apply mirror view if enabled (horizontal flip)
+        if mirror_view_enabled:
+            img = cv2.flip(img, 1)  # 1 = horizontal flip for mirror effect
         
         # Calculate FPS periodically
         self.fps_counter += 1
@@ -616,10 +598,9 @@ class VideoProcessor:
                                         st.session_state.detection_log = st.session_state.detection_log[-10:]
                                     st.session_state.last_alert_time = current_time
                                     break
-                    self.retry_count = 0  # Reset retry count on success
+                    self.retry_count = 0
             except Exception as e:
                 self.retry_count += 1
-                # Don't crash, just continue without detection for this frame
                 if self.retry_count > self.max_retries:
                     self.model_available = False
                 pass
@@ -631,7 +612,7 @@ class VideoProcessor:
             annotated_frame = img
         
         # Add overlays
-        final_frame = add_overlays(annotated_frame, st.session_state.object_counts, self.mirror_view)
+        final_frame = add_overlays(annotated_frame, st.session_state.object_counts, mirror_view_enabled)
         
         # Add status messages
         if not self.model_available or self.model is None:
@@ -643,7 +624,7 @@ class VideoProcessor:
                        (8, final_frame.shape[0] - 10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
         
-        # Handle frame saving (non-blocking)
+        # Handle frame saving
         current_time = time.time()
         try:
             if save_frame_request and (current_time - st.session_state.last_save_time) > 1:
@@ -693,10 +674,16 @@ class VideoProcessor:
         # Return processed frame
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC streamer with connection resilience
+# WebRTC streamer with mirror view support
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
+        
+        # Show current mirror status
+        if st.session_state.mirror_view_enabled:
+            st.caption("🪞 Mirror View: ON (Image is inverted horizontally)")
+        else:
+            st.caption("🎥 Normal View: OFF")
         
         # Parse resolution
         width, height = map(int, st.session_state.resolution.split('x'))
@@ -705,7 +692,7 @@ if st.session_state.camera_active:
         if not st.session_state.model_ready or model is None:
             st.warning("🌐 Waiting for stable internet connection to load AI model...\n\nThe camera will start detecting objects once the connection is stable.")
         
-        # Configure WebRTC streamer with longer timeouts for connection issues
+        # Configure WebRTC streamer
         webrtc_ctx = webrtc_streamer(
             key="object-detection",
             mode=WebRtcMode.SENDRECV,
@@ -732,7 +719,7 @@ if st.session_state.camera_active:
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status message safely
+        # Show status message
         if webrtc_ctx and webrtc_ctx.video_processor:
             if st.session_state.model_ready and model is not None:
                 st.success("✨ Camera active | AI model ready | Object detection running ✨")
