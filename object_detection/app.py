@@ -35,22 +35,21 @@ if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
 if 'mirror_view_enabled' not in st.session_state:
     st.session_state.mirror_view_enabled = True
-if 'frame_skip_counter' not in st.session_state:
-    st.session_state.frame_skip_counter = 0
 
 # Cache the model
 @st.cache_resource
 def load_model():
-    with st.spinner("🔄 Loading AI Model..."):
+    with st.spinner("🔄 Loading AI Model for Object Detection..."):
         try:
             model = YOLO("yolov8n.pt")
-            # Warm up the model
-            dummy_input = np.zeros((320, 320, 3), dtype=np.uint8)
-            model(dummy_input, verbose=False)
+            # Warm up the model with a dummy image
+            dummy_input = np.zeros((640, 640, 3), dtype=np.uint8)
+            results = model(dummy_input, verbose=False)
             st.session_state.model_ready = True
+            st.success("✅ AI Model Loaded Successfully!")
             return model
         except Exception as e:
-            st.warning(f"⚠️ Model loading issue: {str(e)[:100]}")
+            st.error(f"⚠️ Model loading error: {str(e)}")
             return None
 
 model = load_model()
@@ -398,6 +397,9 @@ OBJECT_COLORS = {
     'cat': (255, 215, 0),
     'dog': (255, 140, 0),
     'bird': (255, 165, 0),
+    'chair': (221, 160, 221),
+    'car': (255, 99, 71),
+    'bus': (255, 20, 147),
     'default': (147, 112, 219)
 }
 
@@ -413,35 +415,43 @@ def draw_boxes(frame, boxes_data):
         x1, y1, x2, y2 = map(int, box)
         color = get_object_color(class_name)
         
+        # Draw rectangle
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         
-        label = f"{class_name} {confidence:.2f}" if confidence else class_name
-        (label_w, label_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        # Draw label background
+        label = f"{class_name} {confidence:.2f}"
+        (label_w, label_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        cv2.rectangle(frame, (x1, y1 - label_h - 10), (x1 + label_w + 10, y1), color, -1)
         
-        cv2.rectangle(frame, (x1, y1 - label_h - 5), (x1 + label_w + 5, y1), color, -1)
-        cv2.putText(frame, label, (x1 + 2, y1 - 3), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # Draw label text
+        cv2.putText(frame, label, (x1 + 5, y1 - 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     return frame
 
 def add_overlays(frame, object_counts, mirror_view_enabled):
+    # Add semi-transparent background for text
+    overlay = frame.copy()
+    
+    # Object counting overlay
     if show_counting and object_counts:
         active_counts = {k: v for k, v in object_counts.items() if v > 0}
         if active_counts:
-            y_offset = 25
-            for obj, count in list(active_counts.items())[:5]:
+            y_offset = 30
+            for obj, count in list(active_counts.items())[:6]:
                 cv2.putText(frame, f"{obj}: {count}", 
-                           (8, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 
-                           0.45, (255, 105, 180), 1)
-                y_offset += 18
+                           (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 
+                           0.5, (255, 255, 255), 2)
+                y_offset += 22
     
+    # Mirror view indicator
     if mirror_view_enabled:
-        cv2.putText(frame, "🪞 Mirror View", 
-                   (frame.shape[1] - 120, 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
+        cv2.putText(frame, "🪞 MIRROR VIEW", 
+                   (frame.shape[1] - 150, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 105, 180), 2)
     
     return frame
 
-# Ultra-smooth Video Processor - No Freezing Guaranteed
+# Video Processor with working detection and mirror
 class VideoProcessor:
     def __init__(self):
         self.frame_count = 0
@@ -453,16 +463,15 @@ class VideoProcessor:
         self.model = model
         self.model_available = model is not None
         self.last_detections = []
-        self.last_counts = defaultdict(int)
         
     def recv(self, frame):
         try:
-            # Convert frame to numpy array
+            # Get frame as numpy array
             img = frame.to_ndarray(format="bgr24")
             
-            # Apply mirror view if enabled
+            # IMPORTANT: Apply mirror view FIRST (before detection)
             if st.session_state.mirror_view_enabled:
-                img = cv2.flip(img, 1)
+                img = cv2.flip(img, 1)  # Horizontal flip for mirror effect
             
             # Calculate FPS
             self.frames_in_second += 1
@@ -472,40 +481,28 @@ class VideoProcessor:
                 self.frames_in_second = 0
                 self.fps_start_time = current_time
             
-            # Process detection every 4th frame for smooth performance
+            # Process detection every frame (or every 2 frames for performance)
             self.frame_count += 1
-            should_detect = (self.frame_count % 4 == 0)
+            process_this_frame = (self.frame_count % 2 == 0)
             
-            if should_detect and self.model_available and self.model is not None:
+            if process_this_frame and self.model_available and self.model is not None:
                 try:
-                    # Fast detection with small input size
-                    small_img = cv2.resize(img, (320, 240))
-                    results = self.model(small_img, conf=0.5, iou=0.45, verbose=False, device='cpu')
+                    # Run YOLO detection on the frame
+                    results = self.model(img, conf=0.5, iou=0.45, verbose=False)
                     
-                    if results and results[0].boxes is not None:
+                    if results and len(results) > 0 and results[0].boxes is not None:
                         boxes = results[0].boxes
                         names = results[0].names
-                        
-                        scale_x = img.shape[1] / 320
-                        scale_y = img.shape[0] / 240
                         
                         self.last_detections = []
                         current_counts = defaultdict(int)
                         
                         for box in boxes:
+                            # Get box coordinates
+                            x1, y1, x2, y2 = box.xyxy[0].tolist()
                             class_id = int(box.cls[0])
                             class_name = names[class_id]
                             confidence = float(box.conf[0])
-                            
-                            if hasattr(box, 'xyxy'):
-                                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                            else:
-                                x1, y1, x2, y2 = box[0].tolist()
-                            
-                            x1 *= scale_x
-                            x2 *= scale_x
-                            y1 *= scale_y
-                            y2 *= scale_y
                             
                             self.last_detections.append({
                                 'box': [x1, y1, x2, y2],
@@ -514,7 +511,7 @@ class VideoProcessor:
                             })
                             current_counts[class_name] += 1
                         
-                        # Update object counts
+                        # Update session state counts
                         for obj, count in current_counts.items():
                             st.session_state.object_counts[obj] = count
                         
@@ -522,8 +519,6 @@ class VideoProcessor:
                         for obj in list(st.session_state.object_counts.keys()):
                             if obj not in current_counts:
                                 st.session_state.object_counts[obj] = 0
-                        
-                        self.last_counts = current_counts
                         
                         # Handle alerts
                         if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
@@ -539,22 +534,22 @@ class VideoProcessor:
                                     st.session_state.last_alert_time = current_time
                                     break
                 except Exception as e:
-                    # Silent fail - detection continues on next frame
+                    # Don't crash on detection error
                     pass
             
-            # Draw bounding boxes using last detections
+            # Draw bounding boxes (use last detections if available)
             if self.last_detections:
                 img = draw_boxes(img, self.last_detections)
             
-            # Add overlays
+            # Add overlays (FPS, object counts, mirror indicator)
             img = add_overlays(img, st.session_state.object_counts, st.session_state.mirror_view_enabled)
             
-            # Add FPS display
-            cv2.putText(img, f"{self.current_fps} fps", 
-                       (8, img.shape[0] - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
+            # Add FPS counter
+            cv2.putText(img, f"{self.current_fps} FPS", 
+                       (10, img.shape[0] - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 105, 180), 2)
             
-            # Handle frame saving (non-blocking)
+            # Handle frame saving
             if save_frame_request and (current_time - st.session_state.last_save_time) > 1:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
                 filename = f"detected_frame_{timestamp}.jpg"
@@ -569,8 +564,8 @@ class VideoProcessor:
                 cv2.imwrite(filepath, img)
                 st.session_state.last_auto_save_time = current_time
             
-            # Update UI placeholders (every 15 frames to reduce overhead)
-            if self.frame_count % 15 == 0:
+            # Update UI placeholders periodically
+            if self.frame_count % 10 == 0:
                 try:
                     if show_counting and st.session_state.object_counts:
                         active_counts = {k: v for k, v in st.session_state.object_counts.items() if v > 0}
@@ -587,51 +582,53 @@ class VideoProcessor:
                         if recent_alerts:
                             alert_html = ""
                             for alert in recent_alerts:
-                                alert_html += f"**{alert['object']}** detected\n\n"
+                                alert_html += f"**{alert['object']}** detected ({alert['confidence']})\n\n"
                             alert_placeholder.warning(alert_html)
                 except:
                     pass
             
-            # Return processed frame
             return av.VideoFrame.from_ndarray(img, format="bgr24")
             
         except Exception as e:
-            # If any error occurs, return original frame without crashing
+            # Return original frame if processing fails
             try:
                 img = frame.to_ndarray(format="bgr24")
+                if st.session_state.mirror_view_enabled:
+                    img = cv2.flip(img, 1)
                 return av.VideoFrame.from_ndarray(img, format="bgr24")
             except:
-                # Ultimate fallback - return a blank frame
                 blank = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank, "Camera Active", (50, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                 return av.VideoFrame.from_ndarray(blank, format="bgr24")
 
-# WebRTC Streamer - Optimized for smooth real-time performance
+# WebRTC Streamer
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
         
         if st.session_state.mirror_view_enabled:
-            st.caption("🪞 Mirror Mode: ON")
+            st.caption("🪞 Mirror Mode: ON - Image is flipped horizontally")
         else:
             st.caption("🎥 Normal Mode")
         
         width, height = map(int, st.session_state.resolution.split('x'))
         
         if not st.session_state.model_ready or model is None:
-            st.info("🔄 Loading AI model... Detection will start shortly")
+            st.warning("⚠️ AI Model is still loading... Detection will start when ready")
+        else:
+            st.success("✅ AI Model Ready - Detecting objects in real-time!")
         
-        # Configure WebRTC for maximum smoothness
+        # Configure WebRTC
         webrtc_ctx = webrtc_streamer(
-            key="smooth-object-detection",
+            key="working-object-detection",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessor,
             media_stream_constraints={
                 "video": {
                     "width": {"ideal": width, "max": width},
                     "height": {"ideal": height, "max": height},
-                    "frameRate": {"ideal": 15, "max": 20},
+                    "frameRate": {"ideal": 20, "max": 25},
                 },
                 "audio": False,
             },
@@ -648,12 +645,10 @@ if st.session_state.camera_active:
         
         # Show status
         if webrtc_ctx and webrtc_ctx.video_processor:
-            st.success("✨ Camera Active | Real-time Detection Running Smoothly ✨")
-        else:
-            st.info("🎥 Initializing camera... Please wait")
-else:
+            st.success("✨ Camera Active | Real-time Detection Running ✨")
+elif not st.session_state.camera_active:
     with video_display_area.container():
-        st.info("🌸✨ Click 'Start Camera' to begin real-time object detection! ✨🌸\n\n💕 Make sure to allow camera permissions\n\n🎯 Camera will detect objects live in real-time with no freezing")
+        st.info("🌸✨ Click 'Start Camera' to begin real-time object detection! ✨🌸\n\n💕 Make sure to allow camera permissions\n\n🎯 Detects: people, phones, laptops, bottles, books, pets, and more!")
     
     if st.session_state.webrtc_ctx is not None:
         st.session_state.webrtc_ctx = None
