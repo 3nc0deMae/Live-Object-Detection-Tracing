@@ -14,7 +14,7 @@ SAVED_FRAMES_DIR = "saved_frames"
 if not os.path.exists(SAVED_FRAMES_DIR):
     os.makedirs(SAVED_FRAMES_DIR)
 
-# Initialize session state
+# Initialize session state - PERSISTENT STATE
 if 'object_counts' not in st.session_state:
     st.session_state.object_counts = defaultdict(int)
 if 'detection_log' not in st.session_state:
@@ -43,37 +43,28 @@ if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
 if 'mirror_view_enabled' not in st.session_state:
     st.session_state.mirror_view_enabled = True
+if 'camera_initialized' not in st.session_state:
+    st.session_state.camera_initialized = False
+if 'last_keepalive' not in st.session_state:
+    st.session_state.last_keepalive = time.time()
 
-# Cache the model with retry logic
+# Cache the model
 @st.cache_resource
 def load_model():
-    max_retries = 5
-    retry_delay = 3
-    
-    for attempt in range(max_retries):
+    with st.spinner("🔄 Loading AI Model..."):
         try:
-            st.info(f"🔄 Loading AI model... (Attempt {attempt + 1}/{max_retries})")
             model = YOLO("yolov8n.pt")
             # Warm up the model
             dummy_input = np.zeros((320, 320, 3), dtype=np.uint8)
             model(dummy_input, verbose=False)
             st.session_state.model_ready = True
-            st.success("✅ AI Model loaded successfully!")
             return model
         except Exception as e:
-            if attempt < max_retries - 1:
-                st.warning(f"⚠️ Connection issue. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 1.5
-            else:
-                st.error("❌ Failed to load model. Please check your internet connection.")
-                raise e
+            st.warning(f"⚠️ Model loading issue: {str(e)[:100]}")
+            return None
 
-# Load model with connection handling
-try:
-    model = load_model()
-except:
-    model = None
+# Load model
+model = load_model()
 
 # Custom CSS for girly ribbon theme
 st.markdown("""
@@ -267,18 +258,11 @@ st.markdown("""
         background: rgba(0,0,0,0.1) !important;
     }
     
-    .stVideo {
-        background: rgba(255, 255, 255, 0.2) !important;
-        border-radius: 20px !important;
-        padding: 10px !important;
-    }
-    
-    /* Hide the default WebRTC start/stop buttons */
+    /* Hide default WebRTC buttons */
     .streamlit-webrtc .stButton {
         display: none !important;
     }
     
-    /* Hide any extra button elements */
     .streamlit-webrtc button {
         display: none !important;
     }
@@ -302,12 +286,8 @@ with st.sidebar:
     
     st.markdown("#### 🎥 Camera Settings")
     mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
-    # Update session state when mirror view changes
     if mirror_view != st.session_state.mirror_view_enabled:
         st.session_state.mirror_view_enabled = mirror_view
-        # If camera is active, force refresh to apply mirror setting
-        if st.session_state.camera_active:
-            st.rerun()
     
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
@@ -322,13 +302,6 @@ with st.sidebar:
         help="Higher resolution = better quality but more processing power needed"
     )
     st.session_state.resolution = resolution_options[selected_resolution]
-    
-    if "1080" in st.session_state.resolution:
-        st.info("💕 1080p High Quality - Great detail, good performance")
-    elif "720" in st.session_state.resolution:
-        st.info("✨ 720p Balanced - Good quality and speed")
-    else:
-        st.success("🌸 480p Fast mode - Optimized for smooth performance")
     
     st.markdown("#### 📊 Object Counting")
     show_counting = st.checkbox("🔢 Show Object Counting", value=True)
@@ -368,21 +341,20 @@ with st.sidebar:
 # Video display area
 video_display_area = st.empty()
 
-# Camera control buttons
+# Camera control buttons - SIMPLE AND STABLE
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     if not st.session_state.camera_active:
         if st.button("📷 Start Camera 💖", use_container_width=True, type="primary"):
-            if model is not None:
-                st.session_state.camera_active = True
-                st.session_state.object_counts.clear()
-                st.session_state.detection_log.clear()
-                st.rerun()
-            else:
-                st.error("❌ Model is still loading. Please wait a moment...")
+            st.session_state.camera_active = True
+            st.session_state.camera_initialized = False
+            st.session_state.object_counts.clear()
+            st.session_state.detection_log.clear()
+            st.rerun()
     else:
         if st.button("⏹️ Stop Camera 💔", use_container_width=True, type="secondary"):
             st.session_state.camera_active = False
+            st.session_state.camera_initialized = False
             st.session_state.webrtc_ctx = None
             video_display_area.empty()
             st.rerun()
@@ -500,16 +472,16 @@ def add_overlays(frame, object_counts, mirror_view_enabled):
                 y_offset += 18
     
     if mirror_view_enabled:
-        cv2.putText(frame_copy, "Mirror View (Inverted)", 
-                   (frame_copy.shape[1] - 150, 20), 
+        cv2.putText(frame_copy, "🪞 Mirror View", 
+                   (frame_copy.shape[1] - 120, 20), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
     
     return frame_copy
 
-# Optimized Video Processor with mirror view support
+# Video Processor - STABLE AND PERSISTENT
 class VideoProcessor:
     def __init__(self):
-        self.frame_skip = 2
+        self.frame_skip = 1  # Process every frame for smoother video
         self.frame_count = 0
         self.last_alert_time = 0
         self.last_auto_save_time = 0
@@ -519,90 +491,84 @@ class VideoProcessor:
         self.last_frame = None
         self.model = model
         self.model_available = model is not None
-        self.retry_count = 0
-        self.max_retries = 3
         
     def recv(self, frame):
         self.frame_count += 1
         
-        # Get the current mirror view setting from session state
+        # Get current mirror view setting
         mirror_view_enabled = st.session_state.mirror_view_enabled
         
-        # Get frame as numpy array
+        # Convert frame to numpy array
         img = frame.to_ndarray(format="bgr24")
         
-        # Apply mirror view if enabled (horizontal flip)
+        # Apply mirror view if enabled
         if mirror_view_enabled:
-            img = cv2.flip(img, 1)  # 1 = horizontal flip for mirror effect
+            img = cv2.flip(img, 1)
         
-        # Calculate FPS periodically
+        # Calculate FPS
         self.fps_counter += 1
         if time.time() - self.fps_start_time >= 1.0:
             self.current_fps = self.fps_counter
             self.fps_counter = 0
             self.fps_start_time = time.time()
         
-        # Process frame with YOLO if model is available
+        # Process with YOLO
         current_detections = []
         if self.model_available and self.model is not None:
             try:
-                # Skip frames for better performance
-                if self.frame_count % self.frame_skip == 0:
-                    conf_threshold = 0.45
-                    results = self.model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
+                # Use smaller image size for faster processing
+                conf_threshold = 0.5
+                results = self.model(img, conf=conf_threshold, iou=0.45, verbose=False, device='cpu', imgsz=320)
+                
+                if results and results[0].boxes is not None:
+                    boxes = results[0].boxes
+                    names = results[0].names
                     
-                    if results and results[0].boxes is not None:
-                        boxes = results[0].boxes
-                        names = results[0].names
+                    for box in boxes:
+                        class_id = int(box.cls[0])
+                        class_name = names[class_id]
+                        confidence = float(box.conf[0])
                         
-                        for box in boxes:
-                            class_id = int(box.cls[0])
-                            class_name = names[class_id]
-                            confidence = float(box.conf[0])
-                            
-                            if hasattr(box, 'xyxy'):
-                                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                            else:
-                                x1, y1, x2, y2 = box[0].tolist()
-                            
-                            current_detections.append({
-                                'box': [x1, y1, x2, y2],
-                                'class': class_name,
-                                'confidence': confidence
-                            })
+                        if hasattr(box, 'xyxy'):
+                            x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        else:
+                            x1, y1, x2, y2 = box[0].tolist()
                         
-                        # Update counts
-                        current_counts = defaultdict(int)
+                        current_detections.append({
+                            'box': [x1, y1, x2, y2],
+                            'class': class_name,
+                            'confidence': confidence
+                        })
+                    
+                    # Update counts
+                    current_counts = defaultdict(int)
+                    for det in current_detections:
+                        current_counts[det['class']] += 1
+                    
+                    for obj, count in current_counts.items():
+                        st.session_state.object_counts[obj] = count
+                    
+                    # Reset counts for objects not detected
+                    for obj in list(st.session_state.object_counts.keys()):
+                        if obj not in current_counts:
+                            st.session_state.object_counts[obj] = 0
+                    
+                    # Handle alerts
+                    current_time = time.time()
+                    if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
                         for det in current_detections:
-                            current_counts[det['class']] += 1
-                        
-                        for obj, count in current_counts.items():
-                            st.session_state.object_counts[obj] = count
-                        
-                        # Reset counts for objects not detected
-                        for obj in list(st.session_state.object_counts.keys()):
-                            if obj not in current_counts:
-                                st.session_state.object_counts[obj] = 0
-                        
-                        # Handle alerts
-                        current_time = time.time()
-                        if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
-                            for det in current_detections:
-                                if det['class'] in alert_objects:
-                                    st.session_state.detection_log.append({
-                                        'timestamp': datetime.now().strftime("%H:%M:%S"),
-                                        'object': det['class'],
-                                        'confidence': f"{det['confidence']:.2f}"
-                                    })
-                                    if len(st.session_state.detection_log) > 10:
-                                        st.session_state.detection_log = st.session_state.detection_log[-10:]
-                                    st.session_state.last_alert_time = current_time
-                                    break
-                    self.retry_count = 0
+                            if det['class'] in alert_objects:
+                                st.session_state.detection_log.append({
+                                    'timestamp': datetime.now().strftime("%H:%M:%S"),
+                                    'object': det['class'],
+                                    'confidence': f"{det['confidence']:.2f}"
+                                })
+                                if len(st.session_state.detection_log) > 10:
+                                    st.session_state.detection_log = st.session_state.detection_log[-10:]
+                                st.session_state.last_alert_time = current_time
+                                break
             except Exception as e:
-                self.retry_count += 1
-                if self.retry_count > self.max_retries:
-                    self.model_available = False
+                # Silent fail - keep camera running
                 pass
         
         # Draw bounding boxes
@@ -614,15 +580,10 @@ class VideoProcessor:
         # Add overlays
         final_frame = add_overlays(annotated_frame, st.session_state.object_counts, mirror_view_enabled)
         
-        # Add status messages
-        if not self.model_available or self.model is None:
-            cv2.putText(final_frame, "Waiting for connection...", 
-                       (8, final_frame.shape[0] - 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
-        else:
-            cv2.putText(final_frame, f"FPS: {self.current_fps}", 
-                       (8, final_frame.shape[0] - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
+        # Add FPS counter
+        cv2.putText(final_frame, f"{self.current_fps} fps", 
+                   (8, final_frame.shape[0] - 10), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 105, 180), 1)
         
         # Handle frame saving
         current_time = time.time()
@@ -633,7 +594,6 @@ class VideoProcessor:
                 filepath = os.path.join(SAVED_FRAMES_DIR, filename)
                 cv2.imwrite(filepath, final_frame)
                 st.session_state.last_save_time = current_time
-                st.toast(f"📸 Frame saved!", icon="✨")
             
             if auto_save and (current_time - st.session_state.last_auto_save_time) >= 10:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -644,9 +604,9 @@ class VideoProcessor:
         except:
             pass
         
-        # Update placeholders
+        # Update UI placeholders
         try:
-            if show_counting and st.session_state.object_counts and self.model_available:
+            if show_counting and st.session_state.object_counts:
                 active_counts = {k: v for k, v in st.session_state.object_counts.items() if v > 0}
                 if active_counts:
                     count_text = ""
@@ -655,8 +615,6 @@ class VideoProcessor:
                     count_placeholder.markdown(count_text)
                 else:
                     count_placeholder.write("No objects detected")
-            elif not self.model_available:
-                count_placeholder.warning("⏳ Waiting for connection...")
             
             if enable_alerts and st.session_state.detection_log:
                 recent_alerts = st.session_state.detection_log[-3:]
@@ -668,40 +626,36 @@ class VideoProcessor:
         except:
             pass
         
-        # Store last frame
-        self.last_frame = final_frame
-        
         # Return processed frame
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC streamer with mirror view support
+# WebRTC Streamer - KEEPS CAMERA STABLE AND OPEN
 if st.session_state.camera_active:
     with video_display_area.container():
         st.markdown("### 🎥 Live Camera Feed")
         
-        # Show current mirror status
         if st.session_state.mirror_view_enabled:
-            st.caption("🪞 Mirror View: ON (Image is inverted horizontally)")
+            st.caption("🪞 Mirror Mode: ON")
         else:
-            st.caption("🎥 Normal View: OFF")
+            st.caption("🎥 Normal Mode")
         
         # Parse resolution
         width, height = map(int, st.session_state.resolution.split('x'))
         
-        # Show connection status
+        # Show model status
         if not st.session_state.model_ready or model is None:
-            st.warning("🌐 Waiting for stable internet connection to load AI model...\n\nThe camera will start detecting objects once the connection is stable.")
+            st.info("🔄 Loading AI model... Detection will start shortly")
         
-        # Configure WebRTC streamer
+        # Configure WebRTC - STABLE CONFIGURATION
         webrtc_ctx = webrtc_streamer(
-            key="object-detection",
+            key="object-detection-stable",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessor,
             media_stream_constraints={
                 "video": {
                     "width": {"ideal": width, "max": width},
                     "height": {"ideal": height, "max": height},
-                    "frameRate": {"ideal": 15, "max": 20},
+                    "frameRate": {"ideal": 30, "max": 30},
                 },
                 "audio": False,
             },
@@ -709,27 +663,25 @@ if st.session_state.camera_active:
             rtc_configuration={
                 "iceServers": [
                     {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["stun:stun1.l.google.com:19302"]},
-                    {"urls": ["stun:stun2.l.google.com:19302"]}
-                ],
-                "iceTransportPolicy": "all",
-                "bundlePolicy": "max-bundle",
-                "rtcpMuxPolicy": "require"
-            }
+                    {"urls": ["stun:stun1.l.google.com:19302"]}
+                ]
+            },
+            desired_playing_state=True
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status message
+        # Show status without auto-closing
         if webrtc_ctx and webrtc_ctx.video_processor:
             if st.session_state.model_ready and model is not None:
-                st.success("✨ Camera active | AI model ready | Object detection running ✨")
+                st.success("✨ Camera Active | Object Detection Running ✨")
             else:
-                st.info("🔄 Camera active | Waiting for AI model to load... | Detection will start automatically when ready")
-        elif webrtc_ctx:
-            st.info("🔄 Camera initializing... Please wait...")
+                st.info("🔄 Camera Active | Waiting for AI Model...")
+        else:
+            st.info("🎥 Initializing camera... Please wait")
 else:
     with video_display_area.container():
-        st.info("🌸✨ Click 'Start Camera' below to begin object detection! ✨🌸\n\n💕 Make sure to allow camera permissions when prompted\n\n🌐 Note: First-time loading may take a few moments while the AI model downloads")
+        st.info("🌸✨ Click 'Start Camera' to begin! ✨🌸\n\n💕 Make sure to allow camera permissions")
     
+    # Clear context when camera is stopped
     if st.session_state.webrtc_ctx is not None:
         st.session_state.webrtc_ctx = None
