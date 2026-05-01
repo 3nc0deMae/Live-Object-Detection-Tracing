@@ -35,6 +35,8 @@ if 'last_auto_save_time' not in st.session_state:
     st.session_state.last_auto_save_time = 0
 if 'last_alert_time' not in st.session_state:
     st.session_state.last_alert_time = 0
+if 'video_processor' not in st.session_state:
+    st.session_state.video_processor = None
 
 # Cache the model
 @st.cache_resource
@@ -288,6 +290,21 @@ st.markdown("""
     video {
         border-radius: 20px !important;
     }
+    
+    /* Ensure the video element is visible and properly styled */
+    .streamlit-webrtc video {
+        border-radius: 20px !important;
+        width: 100% !important;
+        height: auto !important;
+        background: rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Style the video container */
+    .stVideo {
+        background: rgba(255, 255, 255, 0.2) !important;
+        border-radius: 20px !important;
+        padding: 10px !important;
+    }
 </style>
 
 <!-- Top Ribbon -->
@@ -380,8 +397,8 @@ with st.sidebar:
         else:
             st.info("💝 No saved frames to delete")
 
-# Create placeholder for video feed
-video_placeholder = st.empty()
+# Video display area - ABOVE the start/stop button
+video_display_area = st.empty()
 
 # Center the camera controls below the video feed
 col1, col2, col3 = st.columns([1, 2, 1])
@@ -395,8 +412,9 @@ with col2:
     else:
         if st.button("⏹️ Stop Camera 💔", use_container_width=True, type="secondary"):
             st.session_state.camera_active = False
-            if st.session_state.webrtc_ctx:
-                st.session_state.webrtc_ctx = None
+            st.session_state.webrtc_ctx = None
+            st.session_state.video_processor = None
+            video_display_area.empty()
             st.rerun()
 
 # Display add-ons information below the camera
@@ -564,14 +582,24 @@ class VideoProcessor:
         
         # Process frame with YOLO
         conf_threshold = 0.4 if "3840" in st.session_state.resolution or "1920" in st.session_state.resolution else 0.5
-        results = model.track(
-            img,
-            persist=True,
-            conf=conf_threshold,
-            iou=0.5,
-            verbose=False,
-            device='cpu'
-        )
+        try:
+            results = model.track(
+                img,
+                persist=True,
+                conf=conf_threshold,
+                iou=0.5,
+                verbose=False,
+                device='cpu'
+            )
+        except Exception as e:
+            # If tracking fails, try without tracking
+            results = model(
+                img,
+                conf=conf_threshold,
+                iou=0.5,
+                verbose=False,
+                device='cpu'
+            )
         
         current_detections = []
         if results[0].boxes is not None:
@@ -639,7 +667,6 @@ class VideoProcessor:
             filepath = os.path.join(SAVED_FRAMES_DIR, filename)
             cv2.imwrite(filepath, final_frame)
             st.session_state.last_save_time = current_time
-            st.toast(f"📸 Frame saved: {filename}", icon="✨")
         
         if auto_save and (current_time - st.session_state.last_auto_save_time) >= 10:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -647,9 +674,8 @@ class VideoProcessor:
             filepath = os.path.join(SAVED_FRAMES_DIR, filename)
             cv2.imwrite(filepath, final_frame)
             st.session_state.last_auto_save_time = current_time
-            st.toast(f"🤖 Auto-saved: {filename}", icon="💾")
         
-        # Update placeholders
+        # Update placeholders for counts and alerts
         if show_counting and st.session_state.object_counts:
             active_counts = {k: v for k, v in st.session_state.object_counts.items() if v > 0}
             if active_counts:
@@ -670,23 +696,35 @@ class VideoProcessor:
         
         return av.VideoFrame.from_ndarray(final_frame, format="bgr24")
 
-# WebRTC streamer
+# WebRTC streamer - Display video in the empty area above the button
 if st.session_state.camera_active:
-    webrtc_ctx = webrtc_streamer(
-        key="object-detection",
-        video_processor_factory=VideoProcessor,
-        media_stream_constraints={
-            "video": {
-                "width": {"ideal": int(st.session_state.resolution.split('x')[0])},
-                "height": {"ideal": int(st.session_state.resolution.split('x')[1])},
-                "frameRate": {"ideal": 30},
+    with video_display_area.container():
+        st.markdown("### 🎥 Live Camera Feed")
+        webrtc_ctx = webrtc_streamer(
+            key="object-detection",
+            video_processor_factory=VideoProcessor,
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": int(st.session_state.resolution.split('x')[0])},
+                    "height": {"ideal": int(st.session_state.resolution.split('x')[1])},
+                    "frameRate": {"ideal": 30},
+                },
+                "audio": False,
             },
-            "audio": False,
-        },
-        async_processing=True,
-    )
-    st.session_state.webrtc_ctx = webrtc_ctx
+            async_processing=True,
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        )
+        st.session_state.webrtc_ctx = webrtc_ctx
+        
+        # Show status message
+        if webrtc_ctx.state.playing:
+            st.success("✨ Camera is active! Object detection running... ✨")
+        else:
+            st.info("🔄 Initializing camera... Please allow camera access.")
 else:
-    if st.session_state.webrtc_ctx:
+    with video_display_area.container():
+        st.info("🌸✨ Click 'Start Camera' below to begin object detection! ✨🌸\n\n💕 Make sure to allow camera permissions when prompted\n\n🎯 Tip: Adjust resolution in sidebar for best quality/performance balance")
+    
+    # Clear any existing WebRTC context
+    if st.session_state.webrtc_ctx is not None:
         st.session_state.webrtc_ctx = None
-    video_placeholder.info("✨ Click 'Start Camera' below to begin object detection ✨\n\n🌸 Make sure to allow camera permissions when prompted\n\n💕 Tip: Adjust resolution in sidebar for best quality/performance balance")
