@@ -8,13 +8,14 @@ from datetime import datetime
 import os
 import time
 import numpy as np
+import threading
 
 # Create saved_frames folder if it doesn't exist
 SAVED_FRAMES_DIR = "saved_frames"
 if not os.path.exists(SAVED_FRAMES_DIR):
     os.makedirs(SAVED_FRAMES_DIR)
 
-# Initialize session state
+# Initialize session state - ALL at the beginning
 if 'object_counts' not in st.session_state:
     st.session_state.object_counts = defaultdict(int)
 if 'detection_log' not in st.session_state:
@@ -35,6 +36,48 @@ if 'model_ready' not in st.session_state:
     st.session_state.model_ready = False
 if 'mirror_view_enabled' not in st.session_state:
     st.session_state.mirror_view_enabled = True
+if 'frame_count' not in st.session_state:
+    st.session_state.frame_count = 0
+
+# Thread-safe storage for shared data
+class SharedData:
+    def __init__(self):
+        self.object_counts = defaultdict(int)
+        self.detection_log = []
+        self.last_alert_time = 0
+        self.last_auto_save_time = 0
+        self.mirror_view_enabled = True
+        self.lock = threading.Lock()
+    
+    def update_counts(self, counts):
+        with self.lock:
+            self.object_counts = counts
+    
+    def get_counts(self):
+        with self.lock:
+            return self.object_counts.copy()
+    
+    def add_alert(self, alert):
+        with self.lock:
+            self.detection_log.append(alert)
+            if len(self.detection_log) > 10:
+                self.detection_log = self.detection_log[-10:]
+    
+    def get_alerts(self):
+        with self.lock:
+            return self.detection_log.copy()
+    
+    def set_mirror(self, value):
+        with self.lock:
+            self.mirror_view_enabled = value
+    
+    def get_mirror(self):
+        with self.lock:
+            return self.mirror_view_enabled
+
+# Initialize shared data
+if 'shared_data' not in st.session_state:
+    st.session_state.shared_data = SharedData()
 
 # Cache the model
 @st.cache_resource
@@ -270,6 +313,7 @@ with st.sidebar:
     mirror_view = st.checkbox("🪞 Mirror View (Inverted)", value=st.session_state.mirror_view_enabled)
     if mirror_view != st.session_state.mirror_view_enabled:
         st.session_state.mirror_view_enabled = mirror_view
+        st.session_state.shared_data.set_mirror(mirror_view)
     
     st.markdown("#### 📱 Quality & Resolution")
     resolution_options = {
@@ -302,6 +346,7 @@ with st.sidebar:
     if st.button("🔄 Reset All Counters", use_container_width=True):
         st.session_state.object_counts.clear()
         st.session_state.detection_log.clear()
+        st.session_state.shared_data = SharedData()
         st.success("✨ Counters reset successfully! ✨")
     
     st.markdown("---")
@@ -407,38 +452,24 @@ def get_object_color(class_name):
     return OBJECT_COLORS.get(class_name.lower(), OBJECT_COLORS['default'])
 
 def draw_boxes(frame, boxes_data):
-    """Draw bounding boxes with labels on the frame"""
     for box_data in boxes_data:
         box = box_data['box']
         class_name = box_data['class']
         confidence = box_data['confidence']
         
-        # Convert coordinates to integers
         x1, y1, x2, y2 = map(int, box)
         color = get_object_color(class_name)
         
-        # Draw rectangle with thicker border
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
         
-        # Prepare label text
         label = f"{class_name.upper()} {confidence:.2f}"
-        
-        # Get text size
         (label_w, label_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        
-        # Draw background for text
         cv2.rectangle(frame, (x1, y1 - label_h - 10), (x1 + label_w + 10, y1), color, -1)
-        
-        # Draw text
         cv2.putText(frame, label, (x1 + 5, y1 - 5), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    
     return frame
 
 def add_overlays(frame, object_counts, mirror_view_enabled):
-    """Add overlays like FPS, object counts, and mirror indicator"""
-    
-    # Object counting overlay
     if show_counting and object_counts:
         active_counts = {k: v for k, v in object_counts.items() if v > 0}
         if active_counts:
@@ -449,9 +480,7 @@ def add_overlays(frame, object_counts, mirror_view_enabled):
                            0.55, (255, 255, 255), 2)
                 y_offset += 25
     
-    # Mirror view indicator
     if mirror_view_enabled:
-        # Draw semi-transparent background for text
         overlay = frame.copy()
         cv2.rectangle(overlay, (frame.shape[1] - 170, 5), (frame.shape[1] - 5, 35), (255, 105, 180), -1)
         frame = cv2.addWeighted(overlay, 0.3, frame, 0.7, 0)
@@ -461,26 +490,25 @@ def add_overlays(frame, object_counts, mirror_view_enabled):
     
     return frame
 
-# Video Processor with working detection and mirror
+# Video Processor with thread-safe access
 class VideoProcessor:
     def __init__(self):
         self.frame_count = 0
-        self.last_alert_time = 0
-        self.last_auto_save_time = 0
         self.fps_start_time = time.time()
         self.frames_in_second = 0
         self.current_fps = 0
         self.model = model
         self.model_available = model is not None
         self.last_detections = []
+        self.shared_data = st.session_state.shared_data
         
     def recv(self, frame):
         try:
-            # Get frame as numpy array (BGR format)
+            # Get frame
             img = frame.to_ndarray(format="bgr24")
             
-            # Create a copy for detection (original image)
-            img_for_detection = img.copy()
+            # Get current mirror setting from shared data
+            mirror_enabled = self.shared_data.get_mirror()
             
             # Calculate FPS
             self.frames_in_second += 1
@@ -490,14 +518,13 @@ class VideoProcessor:
                 self.frames_in_second = 0
                 self.fps_start_time = current_time
             
-            # Process detection every 2 frames for better performance
+            # Process detection every 2 frames
             self.frame_count += 1
-            process_this_frame = (self.frame_count % 2 == 0)
+            process_frame = (self.frame_count % 2 == 0)
             
-            if process_this_frame and self.model_available and self.model is not None:
+            if process_frame and self.model_available and self.model is not None:
                 try:
-                    # Run YOLO detection on the original frame
-                    results = self.model(img_for_detection, conf=0.5, iou=0.45, verbose=False)
+                    results = self.model(img, conf=0.5, iou=0.45, verbose=False)
                     
                     if results and len(results) > 0 and results[0].boxes is not None:
                         boxes = results[0].boxes
@@ -507,13 +534,11 @@ class VideoProcessor:
                         current_counts = defaultdict(int)
                         
                         for box in boxes:
-                            # Get box coordinates
                             x1, y1, x2, y2 = box.xyxy[0].tolist()
                             class_id = int(box.cls[0])
                             class_name = names[class_id]
                             confidence = float(box.conf[0])
                             
-                            # Only include confident detections
                             if confidence > 0.5:
                                 self.last_detections.append({
                                     'box': [x1, y1, x2, y2],
@@ -522,44 +547,36 @@ class VideoProcessor:
                                 })
                                 current_counts[class_name] += 1
                         
-                        # Update session state counts
-                        for obj, count in current_counts.items():
-                            st.session_state.object_counts[obj] = count
-                        
-                        # Reset counts for undetected objects
-                        for obj in list(st.session_state.object_counts.keys()):
-                            if obj not in current_counts:
-                                st.session_state.object_counts[obj] = 0
+                        # Update shared counts
+                        self.shared_data.update_counts(current_counts)
                         
                         # Handle alerts
-                        if enable_alerts and (current_time - st.session_state.last_alert_time) >= 2:
+                        if enable_alerts and (current_time - self.shared_data.last_alert_time) >= 2:
                             for det in self.last_detections:
                                 if det['class'] in alert_objects:
-                                    st.session_state.detection_log.append({
+                                    self.shared_data.add_alert({
                                         'timestamp': datetime.now().strftime("%H:%M:%S"),
                                         'object': det['class'],
                                         'confidence': f"{det['confidence']:.2f}"
                                     })
-                                    if len(st.session_state.detection_log) > 10:
-                                        st.session_state.detection_log = st.session_state.detection_log[-10:]
-                                    st.session_state.last_alert_time = current_time
+                                    self.shared_data.last_alert_time = current_time
                                     break
                 except Exception as e:
-                    print(f"Detection error: {e}")
                     pass
             
-            # Draw bounding boxes on the frame
+            # Draw boxes
             if self.last_detections:
                 img = draw_boxes(img, self.last_detections)
             
-            # Apply mirror view AFTER drawing boxes (so boxes get mirrored too)
-            if st.session_state.mirror_view_enabled:
+            # Apply mirror AFTER drawing boxes
+            if mirror_enabled:
                 img = cv2.flip(img, 1)
             
-            # Add overlays (object counts, mirror indicator)
-            img = add_overlays(img, st.session_state.object_counts, st.session_state.mirror_view_enabled)
+            # Add overlays
+            current_counts = self.shared_data.get_counts()
+            img = add_overlays(img, current_counts, mirror_enabled)
             
-            # Add FPS counter
+            # Add FPS
             cv2.putText(img, f"{self.current_fps} FPS", 
                        (10, img.shape[0] - 10), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 105, 180), 2)
@@ -579,11 +596,11 @@ class VideoProcessor:
                 cv2.imwrite(filepath, img)
                 st.session_state.last_auto_save_time = current_time
             
-            # Update UI placeholders periodically
+            # Update UI displays
             if self.frame_count % 10 == 0:
                 try:
-                    if show_counting and st.session_state.object_counts:
-                        active_counts = {k: v for k, v in st.session_state.object_counts.items() if v > 0}
+                    if show_counting and current_counts:
+                        active_counts = {k: v for k, v in current_counts.items() if v > 0}
                         if active_counts:
                             count_text = ""
                             for obj, count in active_counts.items():
@@ -592,9 +609,10 @@ class VideoProcessor:
                         else:
                             count_placeholder.write("No objects detected")
                     
-                    if enable_alerts and st.session_state.detection_log:
-                        recent_alerts = st.session_state.detection_log[-3:]
-                        if recent_alerts:
+                    if enable_alerts:
+                        alerts = self.shared_data.get_alerts()
+                        if alerts:
+                            recent_alerts = alerts[-3:]
                             alert_html = ""
                             for alert in recent_alerts:
                                 alert_html += f"🔔 **{alert['object']}** detected ({alert['confidence']})\n\n"
@@ -605,18 +623,11 @@ class VideoProcessor:
             return av.VideoFrame.from_ndarray(img, format="bgr24")
             
         except Exception as e:
-            print(f"Video processor error: {e}")
-            # Return original frame if processing fails
-            try:
-                img = frame.to_ndarray(format="bgr24")
-                if st.session_state.mirror_view_enabled:
-                    img = cv2.flip(img, 1)
-                return av.VideoFrame.from_ndarray(img, format="bgr24")
-            except:
-                blank = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(blank, "Camera Active", (50, 240), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                return av.VideoFrame.from_ndarray(blank, format="bgr24")
+            # Return blank frame on error
+            blank = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(blank, "Camera Active", (50, 240), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            return av.VideoFrame.from_ndarray(blank, format="bgr24")
 
 # WebRTC Streamer
 if st.session_state.camera_active:
@@ -635,7 +646,6 @@ if st.session_state.camera_active:
         else:
             st.success("✅ AI Model Ready - Detecting objects in real-time!")
         
-        # Configure WebRTC
         webrtc_ctx = webrtc_streamer(
             key="working-object-detection",
             mode=WebRtcMode.SENDRECV,
@@ -659,11 +669,8 @@ if st.session_state.camera_active:
         )
         st.session_state.webrtc_ctx = webrtc_ctx
         
-        # Show status
         if webrtc_ctx and webrtc_ctx.video_processor:
             st.success("✨ Camera Active | Real-time Detection Running ✨")
-        elif webrtc_ctx:
-            st.info("🎥 Initializing camera... Please wait")
 elif not st.session_state.camera_active:
     with video_display_area.container():
         st.info("🌸✨ Click 'Start Camera' to begin real-time object detection! ✨🌸\n\n💕 Make sure to allow camera permissions\n\n🎯 Detects: people, phones, laptops, bottles, books, pets, and more!")
