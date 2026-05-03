@@ -943,17 +943,6 @@ if st.session_state.camera_active:
                 {"urls": ["stun:stun.services.mozilla.com"]},
                 # Twilio STUN servers
                 {"urls": ["stun:global.stun.twilio.com:3478"]},
-                # Public TURN servers (free tier)
-                {
-                    "urls": ["turn:openrelay.metered.ca:443"],
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject"
-                },
-                {
-                    "urls": ["turn:openrelay.metered.ca:80"],
-                    "username": "openrelayproject",
-                    "credential": "openrelayproject"
-                }
             ]
         },
     )
