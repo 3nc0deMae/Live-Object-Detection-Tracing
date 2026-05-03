@@ -53,7 +53,9 @@ class SharedData:
     
     def update_counts(self, counts):
         with self.lock:
-            self.object_counts = counts
+            # Merge new counts with existing ones instead of replacing
+            for key, value in counts.items():
+                self.object_counts[key] = value
     
     def get_counts(self):
         with self.lock:
@@ -116,10 +118,16 @@ class SharedData:
     def get_save_request(self):
         with self.lock:
             return self.save_request
+    
+    def clear_counts_and_alerts(self):
+        with self.lock:
+            self.object_counts.clear()
+            self.detection_log.clear()
 
 # Initialize shared data as module-level
-if 'shared_data' not in globals():
-    shared_data = SharedData()
+if 'shared_data' not in st.session_state:
+    st.session_state.shared_data = SharedData()
+shared_data = st.session_state.shared_data
 
 # Cache the model (no Streamlit UI calls inside - they persist on reruns)
 @st.cache_resource
@@ -951,6 +959,7 @@ if st.session_state.camera_active:
             ):
                 st.session_state.camera_active = False
                 st.session_state.webrtc_ctx = None
+                shared_data.clear_counts_and_alerts()
                 st.rerun()
     with col3:
         with st.container(border=True):
@@ -997,88 +1006,108 @@ else:
         with st.container(border=True):
             st.markdown('<div style="visibility:hidden">Start Camera</div>', unsafe_allow_html=True)
 
-# Display area
+# ══════════════════════════════════════════════════════════════
+# LIVE STAT CARDS — Auto-refreshing fragment
+# @st.fragment(run_every=2) re-runs ONLY this section every 2s
+# without disrupting the WebRTC video stream above.
+# ══════════════════════════════════════════════════════════════
 st.markdown("---")
-disp_col1, disp_col2, disp_col3 = st.columns(3)
 
-with disp_col1:
-    with st.container(border=True):
-        st.markdown("#### 📊 Object Count")
-        count_placeholder = st.empty()
+@st.fragment(run_every=2)
+def live_stats_panel():
+    """Self-refreshing stat cards that read from shared_data every 2 seconds."""
+    disp_col1, disp_col2, disp_col3 = st.columns(3)
 
-with disp_col2:
-    with st.container(border=True):
-        st.markdown("#### 🚨 Recent Alerts")
-        alert_placeholder = st.empty()
+    # ── Object Count Card ──
+    with disp_col1:
+        with st.container(border=True):
+            st.markdown("#### 📊 Object Count")
+            if st.session_state.camera_active:
+                current_counts = shared_data.get_counts()
+                _show_counting = shared_data.get_show_counting()
+                if _show_counting:
+                    active_counts = {k: v for k, v in current_counts.items() if v > 0}
+                    if active_counts:
+                        count_text = ""
+                        for obj, count in active_counts.items():
+                            count_text += f"**{obj}:** {count}  \n"
+                        st.markdown(count_text)
+                    else:
+                        st.write("📊 No objects detected yet")
+                else:
+                    st.write("🔢 Counting disabled")
+            else:
+                st.write("📊 No objects detected yet")
 
-with disp_col3:
-    with st.container(border=True):
-        st.markdown("#### 💾 Saved Frames")
-        saved_frames = [
-            f for f in os.listdir(SAVED_FRAMES_DIR)
-            if f.startswith(("detected_frame_", "auto_saved_frame_"))
-            and f.endswith(".jpg")
-        ]
-        saved_frames.sort(reverse=True)
-        
-        if saved_frames:
-            st.write(f"📸 Total saved: {len(saved_frames)} frames")
-            for idx, frame_file in enumerate(saved_frames[:5]):
-                frame_path = os.path.join(SAVED_FRAMES_DIR, frame_file)
-                with open(frame_path, "rb") as file:
-                    with st.expander(f"🖼️ {frame_file[:30]}..."):
-                        img = cv2.imread(frame_path)
-                        if img is not None:
-                            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                            st.image(img_rgb, use_container_width=True)
-                        
-                        col_btn1, col_btn2 = st.columns(2)
-                        with col_btn1:
-                            st.download_button(
-                                label="📥 Download",
-                                data=file,
-                                file_name=frame_file,
-                                mime="image/jpeg",
-                                key=f"download_{frame_file}_{idx}"
+    # ── Recent Alerts Card ──
+    with disp_col2:
+        with st.container(border=True):
+            st.markdown("#### 🚨 Recent Alerts")
+            if st.session_state.camera_active:
+                _enable_alerts = shared_data.get_enable_alerts()
+                if _enable_alerts:
+                    alerts = shared_data.get_alerts()
+                    if alerts:
+                        recent_alerts = alerts[-3:]
+                        alert_html = ""
+                        for alert in recent_alerts:
+                            alert_html += (
+                                f"🔔 **{alert['object']}** detected "
+                                f"at {alert['timestamp']} "
+                                f"({alert['confidence']})\n\n"
                             )
-                        with col_btn2:
-                            if st.button(
-                                "🗑️ Delete",
-                                key=f"delete_{frame_file}_{idx}"
-                            ):
-                                try:
-                                    os.remove(frame_path)
-                                    st.success(f"✅ Deleted!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error: {e}")
-        else:
-            st.write("💝 No frames saved yet")
+                        st.warning(alert_html)
+                    else:
+                        st.write("🚨 No alerts triggered yet")
+                else:
+                    st.write("🔔 Alerts disabled")
+            else:
+                st.write("🚨 No alerts triggered yet")
 
-# Update UI from shared data
-if (st.session_state.camera_active
-        and st.session_state.webrtc_ctx
-        and st.session_state.webrtc_ctx.video_processor):
-    
-    current_counts = shared_data.get_counts()
-    if show_counting:
-        active_counts = {k: v for k, v in current_counts.items() if v > 0}
-        if active_counts:
-            count_text = ""
-            for obj, count in active_counts.items():
-                count_text += f"**{obj}:** {count}  \n"
-            count_placeholder.markdown(count_text)
-        else:
-            count_placeholder.write("No objects detected")
-    
-    if enable_alerts:
-        alerts = shared_data.get_alerts()
-        if alerts:
-            recent_alerts = alerts[-3:]
-            alert_html = ""
-            for alert in recent_alerts:
-                alert_html += (
-                    f"🔔 **{alert['object']}** detected "
-                    f"({alert['confidence']})\n\n"
-                )
-            alert_placeholder.warning(alert_html)
+    # ── Saved Frames Card ──
+    with disp_col3:
+        with st.container(border=True):
+            st.markdown("#### 💾 Saved Frames")
+            saved_frames = [
+                f for f in os.listdir(SAVED_FRAMES_DIR)
+                if f.startswith(("detected_frame_", "auto_saved_frame_"))
+                and f.endswith(".jpg")
+            ]
+            saved_frames.sort(reverse=True)
+
+            if saved_frames:
+                st.write(f"📸 Total saved: {len(saved_frames)} frames")
+                for idx, frame_file in enumerate(saved_frames[:5]):
+                    frame_path = os.path.join(SAVED_FRAMES_DIR, frame_file)
+                    with open(frame_path, "rb") as file:
+                        with st.expander(f"🖼️ {frame_file[:30]}..."):
+                            img = cv2.imread(frame_path)
+                            if img is not None:
+                                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                                st.image(img_rgb, use_container_width=True)
+
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                st.download_button(
+                                    label="📥 Download",
+                                    data=file,
+                                    file_name=frame_file,
+                                    mime="image/jpeg",
+                                    key=f"download_{frame_file}_{idx}"
+                                )
+                            with col_btn2:
+                                if st.button(
+                                    "🗑️ Delete",
+                                    key=f"delete_{frame_file}_{idx}"
+                                ):
+                                    try:
+                                        os.remove(frame_path)
+                                        st.success("✅ Deleted!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error: {e}")
+            else:
+                st.write("💝 No frames saved yet")
+
+# Render the auto-refreshing panel
+live_stats_panel()
