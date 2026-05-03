@@ -935,15 +935,43 @@ if st.session_state.camera_active:
         async_processing=True,
         rtc_configuration={
             "iceServers": [
+                # Google STUN servers
                 {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:stun1.l.google.com:19302"]}
+                {"urls": ["stun:stun1.l.google.com:19302"]},
+                {"urls": ["stun:stun2.l.google.com:19302"]},
+                # Mozilla STUN servers
+                {"urls": ["stun:stun.services.mozilla.com"]},
+                # Twilio STUN servers
+                {"urls": ["stun:global.stun.twilio.com:3478"]},
+                # Public TURN servers (free tier)
+                {
+                    "urls": ["turn:openrelay.metered.ca:443"],
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject"
+                },
+                {
+                    "urls": ["turn:openrelay.metered.ca:80"],
+                    "username": "openrelayproject",
+                    "credential": "openrelayproject"
+                }
             ]
         },
     )
     st.session_state.webrtc_ctx = webrtc_ctx
     
-    if webrtc_ctx and webrtc_ctx.video_processor:
-        st.success("✨ Camera Active | Real-time Detection Running ✨")
+    # Diagnostic information
+    if webrtc_ctx:
+        if webrtc_ctx.video_processor:
+            st.success("✨ Camera Active | Real-time Detection Running ✨")
+        elif webrtc_ctx.state.playing:
+            st.info("📡 Camera stream is connecting... Please wait.")
+        else:
+            st.warning("⚠️ Camera is ready but not started. Click the camera button above to start.")
+    else:
+        st.warning("⚠️ WebRTC context not initialized. Please check your browser permissions.")
+        
+    # Desktop browser troubleshooting info
+    st.caption("💡 Desktop tip: Ensure you're using HTTPS or localhost. Allow camera permissions in browser settings.")
     
     # Stop camera button below the feed
     col1, col2, col3 = st.columns([1, 5, 1])
