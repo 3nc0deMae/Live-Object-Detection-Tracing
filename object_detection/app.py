@@ -928,18 +928,8 @@ if st.session_state.camera_active:
         rtc_configuration={
             "iceServers": [
                 {"urls": ["stun:stun.l.google.com:19302"]},
-                {"urls": ["stun:stun1.l.google.com:19302"]},
-                {
-                    "urls": [
-                        "turn:global.relay.metered.ca:443?transport=tcp",
-                        "turn:global.relay.metered.ca:443?transport=udp",
-                        "turn:global.relay.metered.ca:80?transport=tcp",
-                    ],
-                    "username": "e8dd65892f87c0f94e1e6e42",
-                    "credential": "mFq6dDcLzY+4GqVJ",
-                },
-            ],
-            "iceTransportPolicy": "relay",
+                {"urls": ["stun:stun1.l.google.com:19302"]}
+            ]
         },
     )
     st.session_state.webrtc_ctx = webrtc_ctx
